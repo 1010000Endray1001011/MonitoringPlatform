@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  POETRY_VERSION: "2.4.1"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: pipx install poetry==${{ env.POETRY_VERSION }}
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      - name: Run pre-commit
+        run: poetry run pre-commit run --all-files
+
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: monitoringplatform
+          POSTGRES_USER: monitoringplatform
+          POSTGRES_PASSWORD: monitoringplatform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U monitoringplatform"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      SECRET_KEY: ci-only-secret-key-not-used-anywhere-else
+      DEBUG: "False"
+      ALLOWED_HOSTS: "localhost,127.0.0.1"
+      DATABASE_URL: postgres://monitoringplatform:monitoringplatform@localhost:5432/monitoringplatform
+      REDIS_URL: redis://localhost:6379/0
+      MONITORING_ALLOW_PRIVATE_TARGETS: "False"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: pipx install poetry==${{ env.POETRY_VERSION }}
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      - name: Check for missing migrations
+        run: poetry run python manage.py makemigrations --check --dry-run
+
+      - name: Django deployment checks
+        env:
+          # check --deploy only inspects the backend class name, it never
+          # connects — this satisfies mail.E001 without needing real SMTP.
+          EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
+        run: poetry run python manage.py check --deploy --settings=config.settings.production
+
+      - name: Run tests
+        run: poetry run pytest --cov --cov-report=term-missing
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: .coverage

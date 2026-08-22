@@ -1,0 +1,67 @@
+x-app-build: &app-build
+  context: .
+  dockerfile: docker/Dockerfile
+
+x-app-env: &app-env
+  DATABASE_URL: postgres://${POSTGRES_USER:-monitoringplatform}:${POSTGRES_PASSWORD:-monitoringplatform}@postgres:5432/${POSTGRES_DB:-monitoringplatform}
+  REDIS_URL: redis://redis:6379/0
+
+x-app-depends: &app-depends
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-monitoringplatform}
+      POSTGRES_USER: ${POSTGRES_USER:-monitoringplatform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-monitoringplatform}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monitoringplatform}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "6379:6379"
+
+  web:
+    build: *app-build
+    env_file: .env
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS: "true"
+    ports:
+      - "8000:8000"
+    depends_on: *app-depends
+
+  celery-worker:
+    build: *app-build
+    command: celery -A config worker -l info -Q checks,notifications,maintenance --concurrency=8
+    env_file: .env
+    environment: *app-env
+    depends_on: *app-depends
+
+  celery-beat:
+    build: *app-build
+    command: celery -A config beat -l info
+    env_file: .env
+    environment: *app-env
+    depends_on: *app-depends
+
+volumes:
+  pgdata:
