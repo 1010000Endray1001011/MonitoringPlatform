@@ -3,6 +3,7 @@ from django.utils import timezone
 from factory.django import DjangoModelFactory
 
 from apps.accounts.models import User
+from apps.checks.models import CheckResult
 from apps.monitors.models import Monitor
 
 
@@ -33,7 +34,18 @@ class MonitorFactory(DjangoModelFactory):
     # validator only fires through full_clean(), which services call but
     # bare `.save()` does not).
     url = factory.Sequence(lambda n: f"http://example{n}.com/")
-    # Engine-owned in production (ARCHITECTURE.md §4), but tests build
-    # monitors directly rather than through services.create_monitor, so
-    # this has to be supplied explicitly instead of defaulting to now().
+    # Normally set by services.create_monitor, not by the user — but tests
+    # build monitors directly rather than through that service, so this has
+    # to be supplied explicitly instead of defaulting to now().
     next_check_at = factory.LazyFunction(timezone.now)
+
+
+class CheckResultFactory(DjangoModelFactory):
+    class Meta:
+        model = CheckResult
+
+    monitor = factory.SubFactory(MonitorFactory)
+    checked_at = factory.LazyFunction(timezone.now)
+    success = True
+    status_code = 200
+    response_time_ms = 100

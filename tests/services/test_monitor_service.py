@@ -90,7 +90,7 @@ def test_resume_monitor_resets_streak_counters_but_keeps_health_status():
 
     assert resumed.is_enabled is True
     assert resumed.consecutive_failures == 0
-    # ADR-005: health_status is engine-owned and survives pause/resume —
+    # health_status is engine-owned and survives pause/resume —
     # only the user-owned is_enabled flag (and the now-stale streak) reset.
     assert resumed.health_status == Monitor.HealthStatus.DOWN
 

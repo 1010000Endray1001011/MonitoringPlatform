@@ -1,15 +1,18 @@
 """
-Three serializers for three different jobs, on purpose —
-one "do everything" ModelSerializer would either leak engine-owned fields
-into write requests or force list responses to carry detail-only fields:
+Four serializers for four different jobs, on purpose — one "do everything"
+ModelSerializer would either leak engine-owned fields into write requests
+or force list responses to carry detail-only fields:
 
 - MonitorListSerializer   read-only, what `GET /monitors/` returns per row
 - MonitorDetailSerializer read-only, what `GET /monitors/{id}/` returns
 - MonitorWriteSerializer  input only, what POST/PATCH accept
 - MonitorStatusSerializer read-only, the small body pause/resume return
 
-`last_response_time_ms`, `open_incident_id`, `uptime_24h`,
-`avg_response_time_24h_ms` and `notification_channels`
+`open_incident_id`, `uptime_24h`, `avg_response_time_24h_ms` and
+`notification_channels` aren't here yet — they need models that don't exist
+yet (an incident to point at, an hourly aggregate to sum, a notification
+channel to attach). `last_response_time_ms` is the first of that group to
+actually land, now that there's a CheckResult to read it from.
 """
 
 from rest_framework import serializers
@@ -28,6 +31,11 @@ def _compute_status(monitor: Monitor) -> str:
 
 class MonitorListSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
+    # Not a model field — populated by an annotation the ViewSet adds to
+    # its queryset (apps.checks.selectors.annotate_last_response_time), so
+    # this is a plain declared field rather than something Meta.fields
+    # could pick up automatically from the model.
+    last_response_time_ms = serializers.IntegerField(read_only=True, allow_null=True)
 
     class Meta:
         model = Monitor
@@ -42,6 +50,7 @@ class MonitorListSerializer(serializers.ModelSerializer):
             "is_enabled",
             "status",
             "last_checked_at",
+            "last_response_time_ms",
             "next_check_at",
             "created_at",
         ]
@@ -53,6 +62,7 @@ class MonitorListSerializer(serializers.ModelSerializer):
 
 class MonitorDetailSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
+    last_response_time_ms = serializers.IntegerField(read_only=True, allow_null=True)
 
     class Meta:
         model = Monitor
@@ -72,6 +82,7 @@ class MonitorDetailSerializer(serializers.ModelSerializer):
             "consecutive_failures",
             "consecutive_successes",
             "last_checked_at",
+            "last_response_time_ms",
             "next_check_at",
             "created_at",
             "updated_at",

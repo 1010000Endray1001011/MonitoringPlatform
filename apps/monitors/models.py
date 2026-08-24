@@ -84,11 +84,12 @@ class Monitor(UUIDPrimaryKeyModel, TimeStampedModel):
 
     class Meta:
         indexes = [
-            # The dispatcher's hot path: "which enabled monitors
-            # are due right now" — see ARCHITECTURE.md §6.2.
+            # The dispatcher's hot path: "which enabled monitors are due
+            # right now" — a claim query that runs every ~30 seconds and
+            # needs to stay cheap no matter how many monitors exist.
             models.Index(fields=["is_enabled", "next_check_at"], name="monitor_dispatch_idx"),
             # A user's own monitor list, newest first — the only query the
-            # API itself runs against this table in this chunk.
+            # API itself runs against this table right now.
             models.Index(fields=["user", "created_at"], name="monitor_user_created_idx"),
         ]
         constraints = [

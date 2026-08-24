@@ -10,7 +10,7 @@ if not ALLOWED_HOSTS:
 if MONITORING_ALLOW_PRIVATE_TARGETS:  # noqa: F405
     raise RuntimeError(
         "MONITORING_ALLOW_PRIVATE_TARGETS must never be enabled in production "
-        "— it disables the SSRF guard (ARCHITECTURE.md §12.3)."
+        "— it disables the SSRF guard that keeps monitors off private networks."
     )
 
 SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=True)
