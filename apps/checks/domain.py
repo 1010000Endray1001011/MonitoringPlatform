@@ -10,6 +10,7 @@ writing, and treats these functions as the source of truth for what the new
 numbers should be.
 """
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -76,3 +77,65 @@ def compute_next_check_at(*, now: datetime, interval_seconds: int) -> datetime:
     # there's nothing useful to measure about the past, so the schedule
     # just picks up again from wherever the present actually is.
     return now + timedelta(seconds=interval_seconds)
+
+
+@dataclass(frozen=True)
+class ResponseTimeStats:
+    avg: int | None
+    minimum: int | None
+    maximum: int | None
+    p95: int | None
+
+
+def compute_response_time_stats(response_times: list[int]) -> ResponseTimeStats:
+    """Summarize one hour's worth of successful checks' response times.
+
+    Plain Python rather than a database-side percentile aggregate: an
+    hour holds at most a few dozen rows even at the shortest allowed
+    interval, so there's nothing to gain from pushing this into SQL, and
+    it makes the nearest-rank p95 below trivial to unit test with a
+    hand-built list instead of needing real rows and a real database to
+    match Postgres's own interpolation behaviour.
+    """
+    if not response_times:
+        return ResponseTimeStats(avg=None, minimum=None, maximum=None, p95=None)
+
+    ordered = sorted(response_times)
+    # Nearest-rank percentile: the smallest value at or above which 95% of
+    # the data falls. For n=1 this is just that one value; for n=100 it's
+    # the 95th smallest (index 94, zero-based).
+    rank = max(0, min(len(ordered) - 1, math.ceil(0.95 * len(ordered)) - 1))
+
+    return ResponseTimeStats(
+        avg=round(sum(ordered) / len(ordered)),
+        minimum=ordered[0],
+        maximum=ordered[-1],
+        p95=ordered[rank],
+    )
+
+
+def compute_downtime_seconds(
+    incident_windows: list[tuple[datetime, datetime | None]],
+    *,
+    hour_start: datetime,
+    hour_end: datetime,
+) -> int:
+    """How many seconds of `[hour_start, hour_end)` were covered by an
+    incident, given a list of `(started_at, resolved_at)` windows —
+    `resolved_at=None` means still open, treated as covering through the
+    end of the hour being measured.
+
+    Each window is clipped to the hour before being summed, so an
+    incident that started three days ago and is still open only
+    contributes this one hour's worth of downtime to this one row, not
+    its entire (so far unbounded) duration.
+    """
+    total = timedelta()
+    for started_at, resolved_at in incident_windows:
+        window_end = resolved_at or hour_end
+        overlap_start = max(started_at, hour_start)
+        overlap_end = min(window_end, hour_end)
+        if overlap_end > overlap_start:
+            total += overlap_end - overlap_start
+
+    return int(total.total_seconds())

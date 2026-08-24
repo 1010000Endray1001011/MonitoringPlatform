@@ -8,14 +8,19 @@ or force list responses to carry detail-only fields:
 - MonitorWriteSerializer  input only, what POST/PATCH accept
 - MonitorStatusSerializer read-only, the small body pause/resume return
 
-`open_incident_id`, `uptime_24h`, `avg_response_time_24h_ms` and
-`notification_channels` aren't here yet — they need models that don't exist
-yet (an incident to point at, an hourly aggregate to sum, a notification
-channel to attach). `last_response_time_ms` is the first of that group to
-actually land, now that there's a CheckResult to read it from.
+`notification_channels` isn't here yet — it needs a model that doesn't
+exist yet. Everything else that was once deferred for the same reason
+(`last_response_time_ms`, `open_incident_id`, `uptime_24h`,
+`avg_response_time_24h_ms`) has a model to read from now.
 """
 
+from datetime import timedelta
+
+from django.utils import timezone
 from rest_framework import serializers
+
+from apps.checks.models import MonitorHourlyStat
+from apps.checks.stats import summarize_period
 
 from .models import Monitor
 
@@ -31,11 +36,14 @@ def _compute_status(monitor: Monitor) -> str:
 
 class MonitorListSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
-    # Not a model field — populated by an annotation the ViewSet adds to
-    # its queryset (apps.checks.selectors.annotate_last_response_time), so
-    # this is a plain declared field rather than something Meta.fields
-    # could pick up automatically from the model.
+    # Neither of these is a model field — both are populated by
+    # annotations the ViewSet adds to its queryset
+    # (apps.checks.selectors.annotate_last_response_time,
+    # apps.incidents.selectors.annotate_open_incident_id), so they're
+    # plain declared fields rather than something Meta.fields could pick
+    # up automatically from the model.
     last_response_time_ms = serializers.IntegerField(read_only=True, allow_null=True)
+    open_incident_id = serializers.UUIDField(read_only=True, allow_null=True)
 
     class Meta:
         model = Monitor
@@ -51,6 +59,7 @@ class MonitorListSerializer(serializers.ModelSerializer):
             "status",
             "last_checked_at",
             "last_response_time_ms",
+            "open_incident_id",
             "next_check_at",
             "created_at",
         ]
@@ -63,6 +72,9 @@ class MonitorListSerializer(serializers.ModelSerializer):
 class MonitorDetailSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     last_response_time_ms = serializers.IntegerField(read_only=True, allow_null=True)
+    open_incident_id = serializers.UUIDField(read_only=True, allow_null=True)
+    uptime_24h = serializers.SerializerMethodField()
+    avg_response_time_24h_ms = serializers.SerializerMethodField()
 
     class Meta:
         model = Monitor
@@ -83,6 +95,9 @@ class MonitorDetailSerializer(serializers.ModelSerializer):
             "consecutive_successes",
             "last_checked_at",
             "last_response_time_ms",
+            "open_incident_id",
+            "uptime_24h",
+            "avg_response_time_24h_ms",
             "next_check_at",
             "created_at",
             "updated_at",
@@ -91,6 +106,28 @@ class MonitorDetailSerializer(serializers.ModelSerializer):
 
     def get_status(self, obj: Monitor) -> str:
         return _compute_status(obj)
+
+    def get_uptime_24h(self, obj: Monitor) -> float | None:
+        return self._last_24h_summary(obj).uptime_ratio
+
+    def get_avg_response_time_24h_ms(self, obj: Monitor) -> int | None:
+        return self._last_24h_summary(obj).avg_response_time_ms
+
+    def _last_24h_summary(self, obj: Monitor):
+        # Memoized on the serializer instance: get_uptime_24h and
+        # get_avg_response_time_24h_ms both need this, and the detail view
+        # only ever serializes one monitor per request, so caching here
+        # (rather than in the ViewSet, like the annotation-based fields
+        # above) is enough to avoid running the same query twice.
+        if not hasattr(self, "_cached_24h_summary"):
+            since = timezone.now() - timedelta(hours=24)
+            hourly_stats = list(
+                MonitorHourlyStat.objects.filter(monitor=obj, hour_start__gte=since)
+            )
+            # incidents_count isn't used by either field that reads this
+            # summary — 0 is a throwaway value, not a real count.
+            self._cached_24h_summary = summarize_period(hourly_stats, incidents_count=0)
+        return self._cached_24h_summary
 
 
 class MonitorWriteSerializer(serializers.ModelSerializer):

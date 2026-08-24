@@ -1,5 +1,5 @@
 from django.db import models
-from django.db.models import CheckConstraint, Q
+from django.db.models import CheckConstraint, Q, UniqueConstraint
 
 
 class CheckResult(models.Model):
@@ -90,3 +90,61 @@ class CheckResult(models.Model):
     def __str__(self) -> str:
         outcome = "OK" if self.success else (self.error_type or "FAILED")
         return f"{self.monitor_id} @ {self.checked_at}: {outcome}"
+
+
+class MonitorHourlyStat(models.Model):
+    """One hour's worth of CheckResult rows, boiled down to a single row.
+
+    This is what makes "uptime over the last 30 days" a query over ~720
+    small rows per monitor instead of a scan over however many thousands
+    of raw checks happened in that window — and it's also what retention
+    (purge_old_check_results) waits for before it's willing to delete the
+    raw rows an hour's worth of history came from. Same reasoning as
+    CheckResult for using a plain integer pk instead of a UUID: this table
+    is still high-volume (one row per monitor per hour, forever), just
+    ~60x smaller than the raw table it summarizes.
+
+    avg/min/max/p95 are computed from *successful* checks only — a
+    response_time_ms only exists once a response actually arrived, so
+    there's nothing meaningful to average over a failed check.
+    """
+
+    monitor = models.ForeignKey(
+        "monitors.Monitor", on_delete=models.CASCADE, related_name="hourly_stats"
+    )
+    hour_start = models.DateTimeField()
+    checks_total = models.PositiveIntegerField()
+    checks_failed = models.PositiveIntegerField()
+    avg_response_ms = models.PositiveIntegerField(null=True, blank=True)
+    min_response_ms = models.PositiveIntegerField(null=True, blank=True)
+    max_response_ms = models.PositiveIntegerField(null=True, blank=True)
+    # Not a true statistical percentile over the raw rows — see
+    # apps/checks/domain.py's compute_response_time_stats for exactly what
+    # this is instead and why that's an acceptable trade-off here.
+    p95_response_ms = models.PositiveIntegerField(null=True, blank=True)
+    # Seconds of this hour that overlapped an Incident touching this
+    # monitor (open or since-resolved) — computed once here at rollup time
+    # so the /stats endpoint never has to re-walk Incident rows itself.
+    downtime_seconds = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        indexes = [
+            # Per-monitor history, newest first — what the /stats endpoint
+            # actually reads.
+            models.Index(fields=["monitor", "-hour_start"], name="hourlystat_monitor_idx"),
+            # A plain hour_start index too, same reasoning as CheckResult's
+            # own checked_at index: the retention sweep scans across every
+            # monitor by hour, not by monitor first.
+            models.Index(fields=["hour_start"], name="hourlystat_hour_start_idx"),
+        ]
+        constraints = [
+            # One row per (monitor, hour) is also the idempotency mechanism
+            # for the rollup task — re-running it for an hour that's
+            # already aggregated does an update_or_create, never a
+            # duplicate.
+            UniqueConstraint(fields=["monitor", "hour_start"], name="hourlystat_unique_hour"),
+        ]
+        ordering = ["-hour_start"]
+
+    def __str__(self) -> str:
+        return f"{self.monitor_id} @ {self.hour_start}"

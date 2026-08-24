@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import CheckResult
+from .models import CheckResult, MonitorHourlyStat
 
 
 @admin.register(CheckResult)
@@ -21,6 +21,34 @@ class CheckResultAdmin(admin.ModelAdmin):
     # here would falsify what the monitoring engine actually observed, and
     # deleting one by hand would leave a silent gap indistinguishable from
     # a real one.
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
+
+
+@admin.register(MonitorHourlyStat)
+class MonitorHourlyStatAdmin(admin.ModelAdmin):
+    list_display = [
+        "monitor",
+        "hour_start",
+        "checks_total",
+        "checks_failed",
+        "avg_response_ms",
+        "p95_response_ms",
+        "downtime_seconds",
+    ]
+    list_filter = ["hour_start"]
+    search_fields = ["monitor__name", "monitor__url"]
+    date_hierarchy = "hour_start"
+
+    # Same reasoning as CheckResultAdmin: this table is computed, not
+    # authored — the rollup task is the only thing that should ever write
+    # a row here.
     def has_add_permission(self, request) -> bool:
         return False
 

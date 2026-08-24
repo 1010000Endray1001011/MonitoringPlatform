@@ -43,3 +43,25 @@ def check_results_for_monitor(
     if until is not None:
         queryset = queryset.filter(checked_at__lte=until)
     return queryset
+
+
+def streak_start_at(monitor: Monitor, *, success: bool, count: int) -> datetime | None:
+    """The `checked_at` of the earliest check in the most recent run of
+    `count` consecutive checks with the given `success` value.
+
+    Used only at the exact moment processor.py detects a real status
+    transition, to find when the crossing streak actually began — not the
+    moment it happened to cross the threshold. Filtering by `success`
+    explicitly (rather than just taking the last `count` rows regardless
+    of outcome) makes the correctness of this query obvious from the code
+    itself: processor.py's own staleness guard already ensures the
+    monitor's `select_for_update()`'d processing never sees an
+    out-of-order result by the time this runs, so the last `count` rows
+    with the matching outcome are exactly the streak that just crossed.
+    """
+    checked_at_values = list(
+        CheckResult.objects.filter(monitor=monitor, success=success)
+        .order_by("-checked_at")
+        .values_list("checked_at", flat=True)[:count]
+    )
+    return min(checked_at_values) if checked_at_values else None

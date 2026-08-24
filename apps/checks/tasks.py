@@ -8,17 +8,21 @@ and translate the result into a retry decision.
 """
 
 import logging
+from datetime import timedelta
 
 from celery import shared_task
+from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 
+from apps.incidents import selectors as incidents_selectors
 from apps.monitors.models import Monitor
 from integrations.http_probe import ProbeRequest, get_http_probe
 
-from . import processor, scheduler
-from .models import CheckResult
+from . import domain, processor, scheduler
+from .models import CheckResult, MonitorHourlyStat
 
 logger = logging.getLogger(__name__)
 
@@ -101,3 +105,87 @@ def run_check(self, monitor_id) -> None:
             )
     finally:
         cache.delete(lock_key)
+
+
+@shared_task(name="apps.checks.tasks.rollup_hourly_stats")
+def rollup_hourly_stats(hour_start=None) -> None:
+    """Summarize one hour's CheckResult rows into one MonitorHourlyStat row
+    per monitor that had any activity that hour.
+
+    `hour_start` is normally left unset — it defaults to the most recently
+    *fully closed* hour, never the current one, since that's still being
+    written to. The parameter exists for manual backfill and for tests
+    that need a specific, known hour rather than whatever "now" happens to
+    be. `update_or_create` on the (monitor, hour_start) unique constraint
+    makes a re-run for an hour that's already aggregated idempotent —
+    it recomputes and overwrites, it doesn't duplicate.
+    """
+    if hour_start is None:
+        hour_start = timezone.now().replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+    hour_end = hour_start + timedelta(hours=1)
+
+    monitors_with_activity = Monitor.objects.filter(
+        id__in=CheckResult.objects.filter(
+            checked_at__gte=hour_start, checked_at__lt=hour_end
+        ).values("monitor_id")
+    )
+
+    for monitor in monitors_with_activity:
+        checks_in_hour = CheckResult.objects.filter(
+            monitor=monitor, checked_at__gte=hour_start, checked_at__lt=hour_end
+        )
+        totals = checks_in_hour.aggregate(
+            total=Count("id"), failed=Count("id", filter=Q(success=False))
+        )
+        response_times = list(
+            checks_in_hour.filter(success=True).values_list("response_time_ms", flat=True)
+        )
+        response_stats = domain.compute_response_time_stats(response_times)
+
+        incident_windows = incidents_selectors.incident_windows_for_monitor(
+            monitor, start=hour_start, end=hour_end
+        )
+        downtime_seconds = domain.compute_downtime_seconds(
+            incident_windows, hour_start=hour_start, hour_end=hour_end
+        )
+
+        MonitorHourlyStat.objects.update_or_create(
+            monitor=monitor,
+            hour_start=hour_start,
+            defaults={
+                "checks_total": totals["total"],
+                "checks_failed": totals["failed"],
+                "avg_response_ms": response_stats.avg,
+                "min_response_ms": response_stats.minimum,
+                "max_response_ms": response_stats.maximum,
+                "p95_response_ms": response_stats.p95,
+                "downtime_seconds": downtime_seconds,
+            },
+        )
+
+
+@shared_task(name="apps.checks.tasks.purge_old_check_results")
+def purge_old_check_results() -> None:
+    """Delete raw CheckResult rows once they're old enough *and* already
+    aggregated into an hourly stat — never the other way around, since
+    deleting first would lose data the rollup hasn't summarized yet.
+
+    Bounded to a rolling window (`window_start` to `cutoff`) rather than
+    "every aggregated hour older than cutoff": aggregates themselves are
+    never deleted, so an unbounded query would re-scan the *entire*
+    history of old, already-empty hours again every single day, forever.
+    The window only needs to be a few days wide — anything this task
+    hasn't caught within that margin will simply be caught the next time
+    it runs.
+    """
+    cutoff = timezone.now() - timedelta(days=settings.MONITORING_RAW_RETENTION_DAYS)
+    window_start = cutoff - timedelta(days=3)
+
+    stats_to_purge = MonitorHourlyStat.objects.filter(
+        hour_start__gte=window_start, hour_start__lt=cutoff
+    )
+    for stat in stats_to_purge:
+        hour_end = stat.hour_start + timedelta(hours=1)
+        CheckResult.objects.filter(
+            monitor_id=stat.monitor_id, checked_at__gte=stat.hour_start, checked_at__lt=hour_end
+        ).delete()

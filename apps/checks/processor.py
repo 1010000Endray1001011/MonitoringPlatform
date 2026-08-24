@@ -1,16 +1,23 @@
 """
 Turns one probe outcome into a permanent record and, if it matters, a
-change to the monitor's status. This is the one place that writes to
-CheckResult and to a Monitor's engine-owned fields at the same time.
+change to the monitor's status — and, if that change is a real transition,
+opens or resolves the Incident that represents it. This is the one place
+that writes to CheckResult and to a Monitor's engine-owned fields at the
+same time, and the one place that decides an Incident needs to exist at
+all (apps.incidents.services only ever writes an Incident when told to).
 """
 
 from django.db import transaction
 
+from apps.incidents import selectors as incidents_selectors
+from apps.incidents import services as incidents_services
+from apps.incidents.models import Incident
 from apps.monitors.models import Monitor
 from integrations.http_probe import ProbeResult
 
 from . import domain
 from .models import CheckResult
+from .selectors import streak_start_at
 
 
 def process_check_result(*, monitor_id, checked_at, probe_result: ProbeResult) -> CheckResult:
@@ -24,6 +31,9 @@ def process_check_result(*, monitor_id, checked_at, probe_result: ProbeResult) -
     must never be lost or duplicated), and the monitor's own row, which
     gets `SELECT ... FOR UPDATE`'d so two results for the same monitor
     landing at nearly the same moment get serialised instead of racing.
+    That same lock is what makes the Incident handling below safe too —
+    two results for one monitor can never both decide a transition
+    happened at the same time.
 
     Raises `Monitor.DoesNotExist` if the monitor was deleted between being
     claimed and this call — the caller (the Celery task) is expected to
@@ -52,6 +62,7 @@ def process_check_result(*, monitor_id, checked_at, probe_result: ProbeResult) -
         if monitor.last_checked_at is not None and checked_at <= monitor.last_checked_at:
             return check_result
 
+        old_status = monitor.health_status
         transition = domain.apply_check_outcome(
             current_status=monitor.health_status,
             consecutive_failures=monitor.consecutive_failures,
@@ -75,9 +86,41 @@ def process_check_result(*, monitor_id, checked_at, probe_result: ProbeResult) -
             ]
         )
 
-        # A status transition doesn't do anything beyond updating this row
-        # yet — nothing here opens or closes an incident, and nothing sends
-        # a notification. Both of those react to the same transition, once
-        # there's somewhere for them to live.
+        # An incident is only ever opened or resolved on the boundary
+        # crossing itself, never on every failed/successful check — that's
+        # exactly what apply_check_outcome's thresholds already decided
+        # above by changing (or not changing) health_status. No
+        # notification gets sent from here: apps.notifications doesn't
+        # exist yet, this only records that something happened.
+        if transition.health_status != old_status:
+            if transition.health_status == Monitor.HealthStatus.DOWN:
+                # This check is itself the most recent of the failing
+                # streak — it was already written above, so it's visible
+                # to this query within the same transaction.
+                started_at = (
+                    streak_start_at(monitor, success=False, count=transition.consecutive_failures)
+                    or checked_at
+                )
+                incidents_services.open_incident(
+                    monitor=monitor,
+                    started_at=started_at,
+                    trigger_error_type=probe_result.error_type,
+                    trigger_status_code=probe_result.status_code,
+                    failed_checks_count=transition.consecutive_failures,
+                )
+            elif transition.health_status == Monitor.HealthStatus.UP:
+                open_incident = incidents_selectors.open_incident_for_monitor(monitor)
+                if open_incident is not None:
+                    resolved_at = (
+                        streak_start_at(
+                            monitor, success=True, count=transition.consecutive_successes
+                        )
+                        or checked_at
+                    )
+                    incidents_services.resolve_incident(
+                        incident=open_incident,
+                        resolved_at=resolved_at,
+                        resolution_source=Incident.ResolutionSource.AUTO_RECOVERY,
+                    )
 
     return check_result

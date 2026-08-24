@@ -1,24 +1,32 @@
 """
 HTTP layer for Monitor: translates requests <-> apps.monitors.services /
 apps.checks.services and nothing else — no business rules belong here.
-
-`/stats` is not in this file: it needs MonitorHourlyStat, which doesn't
-exist yet.
 """
 
+from dataclasses import asdict
+from datetime import timedelta
+
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
-from rest_framework import filters, permissions, viewsets
+from rest_framework import filters, permissions, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.checks import services as checks_services
+from apps.checks import stats as stats_module
+from apps.checks.models import MonitorHourlyStat
 from apps.checks.selectors import annotate_last_response_time, check_results_for_monitor
-from apps.checks.serializers import CheckResultSerializer, ImmediateCheckAcceptedSerializer
+from apps.checks.serializers import (
+    CheckResultSerializer,
+    ImmediateCheckAcceptedSerializer,
+    MonitorStatsSerializer,
+)
 from apps.common.pagination import CheckResultCursorPagination
 from apps.common.permissions import IsOwner
+from apps.incidents import selectors as incidents_selectors
 
 from . import services
 from .filters import MonitorFilterSet
@@ -30,6 +38,13 @@ from .serializers import (
     MonitorStatusSerializer,
     MonitorWriteSerializer,
 )
+
+# period -> (how far back, which series granularity to use)
+_STATS_PERIODS = {
+    "24h": (timedelta(hours=24), "hour"),
+    "7d": (timedelta(days=7), "day"),
+    "30d": (timedelta(days=30), "day"),
+}
 
 
 def _parse_bool_param(value: str | None) -> bool | None:
@@ -70,10 +85,11 @@ class MonitorViewSet(viewsets.ModelViewSet):
         # (above) is a second, independent check on top of this for detail
         # routes — not a substitute for it.
         queryset = monitors_for_user(self.request.user)
-        # One subquery per request instead of one query per row: without
-        # this, MonitorListSerializer's last_response_time_ms would fire a
-        # fresh query per monitor just to render a list.
-        return annotate_last_response_time(queryset)
+        # Two subqueries per request instead of two queries per row:
+        # without these, last_response_time_ms and open_incident_id would
+        # each fire a fresh query per monitor just to render a list.
+        queryset = annotate_last_response_time(queryset)
+        return incidents_selectors.annotate_open_incident_id(queryset)
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -89,10 +105,11 @@ class MonitorViewSet(viewsets.ModelViewSet):
         # Deliberately not `serializer.save()` — creation is a service call
         # (quota check, next_check_at, full_clean), not a bare ORM insert.
         monitor = services.create_monitor(user=request.user, **serializer.validated_data)
-        # A monitor this fresh cannot have a CheckResult yet — no query
-        # needed to know that, unlike get_queryset()'s annotation for
-        # every other response, which reads it from real history.
+        # A monitor this fresh cannot have a CheckResult or an Incident
+        # yet — no query needed to know that, unlike get_queryset()'s
+        # annotations for every other response, which read real history.
         monitor.last_response_time_ms = None
+        monitor.open_incident_id = None
         return Response(MonitorDetailSerializer(monitor).data, status=201)
 
     @extend_schema(responses=MonitorDetailSerializer)
@@ -158,4 +175,49 @@ class MonitorViewSet(viewsets.ModelViewSet):
                 "poll_url": f"/api/v1/monitors/{monitor.id}/checks/?page_size=1",
             },
             status=202,
+        )
+
+    @extend_schema(responses=MonitorStatsSerializer)
+    @action(detail=True, methods=["get"])
+    def stats(self, request: Request, pk=None) -> Response:
+        monitor = self.get_object()
+
+        period = request.query_params.get("period", "24h")
+        if period not in _STATS_PERIODS:
+            # Unlike the /checks history filters (since/until), a bad
+            # `period` isn't a narrowing that can just fall back to "no
+            # filter" — it fundamentally changes what's being asked for,
+            # so silently defaulting would return data for a different
+            # question than the one the caller typed.
+            raise serializers.ValidationError(
+                {"period": f"Must be one of: {', '.join(_STATS_PERIODS)}."}
+            )
+        span, granularity = _STATS_PERIODS[period]
+
+        period_to = timezone.now()
+        period_from = period_to - span
+
+        hourly_stats = list(
+            MonitorHourlyStat.objects.filter(
+                monitor=monitor, hour_start__gte=period_from, hour_start__lt=period_to
+            )
+        )
+        incident_windows = incidents_selectors.incident_windows_for_monitor(
+            monitor, start=period_from, end=period_to
+        )
+
+        summary = stats_module.summarize_period(
+            hourly_stats, incidents_count=len(incident_windows)
+        )
+        series = stats_module.build_series(hourly_stats, granularity=granularity)
+
+        return Response(
+            {
+                "monitor_id": monitor.id,
+                "period": period,
+                "period_from": period_from,
+                "period_to": period_to,
+                "summary": asdict(summary),
+                "series": series,
+            }
         )

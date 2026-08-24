@@ -3,7 +3,8 @@ from django.utils import timezone
 from factory.django import DjangoModelFactory
 
 from apps.accounts.models import User
-from apps.checks.models import CheckResult
+from apps.checks.models import CheckResult, MonitorHourlyStat
+from apps.incidents.models import Incident
 from apps.monitors.models import Monitor
 
 
@@ -49,3 +50,30 @@ class CheckResultFactory(DjangoModelFactory):
     success = True
     status_code = 200
     response_time_ms = 100
+
+
+class IncidentFactory(DjangoModelFactory):
+    class Meta:
+        model = Incident
+
+    monitor = factory.SubFactory(MonitorFactory)
+    status = Incident.Status.OPEN
+    started_at = factory.LazyFunction(timezone.now)
+    trigger_error_type = "TIMEOUT"
+    failed_checks_count = 2
+
+
+class MonitorHourlyStatFactory(DjangoModelFactory):
+    class Meta:
+        model = MonitorHourlyStat
+
+    monitor = factory.SubFactory(MonitorFactory)
+    hour_start = factory.LazyFunction(
+        lambda: timezone.now().replace(minute=0, second=0, microsecond=0)
+    )
+    checks_total = 60
+    checks_failed = 0
+    avg_response_ms = 100
+    min_response_ms = 80
+    max_response_ms = 150
+    p95_response_ms = 140

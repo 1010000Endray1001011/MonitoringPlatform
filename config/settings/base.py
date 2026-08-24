@@ -172,6 +172,11 @@ SPECTACULAR_SETTINGS = {
     "COMPONENT_SPLIT_REQUEST": True,
     "ENUM_NAME_OVERRIDES": {
         "DependencyStatusEnum": "apps.common.serializers.DEPENDENCY_STATUS_CHOICES",
+        # Incident.status (OPEN/ACKNOWLEDGED/RESOLVED) collides on the bare
+        # field name "status" with HealthCheckSerializer.status (ok/degraded)
+        # — different choice sets, same field name, so drf-spectacular can't
+        # merge them into one enum component and needs an explicit name.
+        "IncidentStatusEnum": "apps.incidents.models.INCIDENT_STATUS_CHOICES",
     },
 }
 
