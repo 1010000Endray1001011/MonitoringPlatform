@@ -2,7 +2,7 @@ import pytest
 from rest_framework import status
 
 from apps.monitors.models import Monitor
-from tests.factories import MonitorFactory, UserFactory
+from tests.factories import MonitorFactory, NotificationChannelFactory, UserFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -189,3 +189,53 @@ def test_unauthenticated_request_is_rejected(api_client):
     response = api_client.get("/api/v1/monitors/")
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_create_monitor_attaches_the_caller_s_own_notification_channel(authenticated_client, user):
+    channel = NotificationChannelFactory(user=user)
+
+    response = authenticated_client.post(
+        "/api/v1/monitors/",
+        {
+            "name": "Wired up",
+            "url": "https://example.com/",
+            "notification_channel_ids": [str(channel.id)],
+        },
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert [c["id"] for c in response.data["notification_channels"]] == [str(channel.id)]
+
+
+def test_create_monitor_rejects_another_user_s_notification_channel(authenticated_client):
+    other_channel = NotificationChannelFactory(user=UserFactory())
+
+    response = authenticated_client.post(
+        "/api/v1/monitors/",
+        {
+            "name": "Not allowed",
+            "url": "https://example.com/",
+            "notification_channel_ids": [str(other_channel.id)],
+        },
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+def test_update_monitor_replaces_its_notification_channels(authenticated_client, user):
+    monitor = MonitorFactory(user=user)
+    first = NotificationChannelFactory(user=user)
+    second = NotificationChannelFactory(user=user)
+    monitor.notification_channels.add(first)
+
+    response = authenticated_client.patch(
+        f"/api/v1/monitors/{monitor.id}/",
+        {"notification_channel_ids": [str(second.id)]},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    channel_ids = [c["id"] for c in response.data["notification_channels"]]
+    assert channel_ids == [str(second.id)]

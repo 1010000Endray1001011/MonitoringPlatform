@@ -8,10 +8,10 @@ or force list responses to carry detail-only fields:
 - MonitorWriteSerializer  input only, what POST/PATCH accept
 - MonitorStatusSerializer read-only, the small body pause/resume return
 
-`notification_channels` isn't here yet — it needs a model that doesn't
-exist yet. Everything else that was once deferred for the same reason
+Every field that was once deferred pending a model that didn't exist yet
 (`last_response_time_ms`, `open_incident_id`, `uptime_24h`,
-`avg_response_time_24h_ms`) has a model to read from now.
+`avg_response_time_24h_ms`, `notification_channels`) now has one to read
+from.
 """
 
 from datetime import timedelta
@@ -21,8 +21,19 @@ from rest_framework import serializers
 
 from apps.checks.models import MonitorHourlyStat
 from apps.checks.stats import summarize_period
+from apps.notifications.models import NotificationChannel
 
 from .models import Monitor
+
+
+class _NotificationChannelSummarySerializer(serializers.ModelSerializer):
+    """Just enough of a channel to identify it from inside a monitor — the
+    full channel (config, verification state) is one request away."""
+
+    class Meta:
+        model = NotificationChannel
+        fields = ["id", "type", "name"]
+        read_only_fields = fields
 
 
 def _compute_status(monitor: Monitor) -> str:
@@ -75,6 +86,10 @@ class MonitorDetailSerializer(serializers.ModelSerializer):
     open_incident_id = serializers.UUIDField(read_only=True, allow_null=True)
     uptime_24h = serializers.SerializerMethodField()
     avg_response_time_24h_ms = serializers.SerializerMethodField()
+    # The real M2M reverse accessor (NotificationChannel.monitors'
+    # related_name) — declared explicitly because the default DRF would
+    # otherwise render it as a bare list of ids, not this nested summary.
+    notification_channels = _NotificationChannelSummarySerializer(many=True, read_only=True)
 
     class Meta:
         model = Monitor
@@ -98,6 +113,7 @@ class MonitorDetailSerializer(serializers.ModelSerializer):
             "open_incident_id",
             "uptime_24h",
             "avg_response_time_24h_ms",
+            "notification_channels",
             "next_check_at",
             "created_at",
             "updated_at",
@@ -141,6 +157,18 @@ class MonitorWriteSerializer(serializers.ModelSerializer):
     one (DRF's ModelSerializer derives `required` from that automatically).
     """
 
+    # write_only + a field name that doesn't match the model's own
+    # `notification_channels` (the M2M itself): `validated_data` ends up
+    # with a literal `notification_channel_ids` key, matching the keyword
+    # apps.monitors.services.create_monitor/update_monitor already expect,
+    # with no `source=` indirection needed.
+    notification_channel_ids = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=NotificationChannel.objects.none(),
+        required=False,
+        write_only=True,
+    )
+
     class Meta:
         model = Monitor
         fields = [
@@ -153,7 +181,28 @@ class MonitorWriteSerializer(serializers.ModelSerializer):
             "headers",
             "failure_threshold",
             "success_threshold",
+            "notification_channel_ids",
         ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # The empty queryset above is just a placeholder so the field can
+        # be declared before a request exists (e.g. during schema
+        # generation) — scoped to the actual caller here, so a monitor can
+        # never be wired up to another user's notification channel.
+        #
+        # `many=True` on a RelatedField doesn't return that field itself —
+        # `PrimaryKeyRelatedField.__new__` intercepts it and returns a
+        # `ManyRelatedField` wrapping the real field as `.child_relation`.
+        # The queryset lives on that inner field; setting `.queryset` on
+        # the wrapper is a silent no-op; every provided id then fails
+        # validation against the empty placeholder queryset instead.
+        request = self.context.get("request")
+        if request is not None and request.user.is_authenticated:
+            channel_field = self.fields["notification_channel_ids"]
+            channel_field.child_relation.queryset = NotificationChannel.objects.filter(
+                user=request.user
+            )
 
     def validate(self, attrs: dict) -> dict:
         # Mirrors Monitor.clean() (apps/monitors/models.py) so a bad

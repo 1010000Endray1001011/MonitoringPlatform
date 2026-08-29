@@ -1,7 +1,8 @@
 """
 Turns one probe outcome into a permanent record and, if it matters, a
 change to the monitor's status — and, if that change is a real transition,
-opens or resolves the Incident that represents it. This is the one place
+opens or resolves the Incident that represents it and enqueues whatever
+notifications that incident event needs to go out. This is the one place
 that writes to CheckResult and to a Monitor's engine-owned fields at the
 same time, and the one place that decides an Incident needs to exist at
 all (apps.incidents.services only ever writes an Incident when told to).
@@ -13,6 +14,8 @@ from apps.incidents import selectors as incidents_selectors
 from apps.incidents import services as incidents_services
 from apps.incidents.models import Incident
 from apps.monitors.models import Monitor
+from apps.notifications import services as notifications_services
+from apps.notifications.models import NotificationDelivery
 from integrations.http_probe import ProbeResult
 
 from . import domain
@@ -89,9 +92,11 @@ def process_check_result(*, monitor_id, checked_at, probe_result: ProbeResult) -
         # An incident is only ever opened or resolved on the boundary
         # crossing itself, never on every failed/successful check — that's
         # exactly what apply_check_outcome's thresholds already decided
-        # above by changing (or not changing) health_status. No
-        # notification gets sent from here: apps.notifications doesn't
-        # exist yet, this only records that something happened.
+        # above by changing (or not changing) health_status. Enqueueing a
+        # notification happens in the same transaction as the incident
+        # change it's about, via the outbox (apps.notifications.services)
+        # — actually sending it is someone else's job, later, off this
+        # transaction entirely.
         if transition.health_status != old_status:
             if transition.health_status == Monitor.HealthStatus.DOWN:
                 # This check is itself the most recent of the failing
@@ -101,12 +106,15 @@ def process_check_result(*, monitor_id, checked_at, probe_result: ProbeResult) -
                     streak_start_at(monitor, success=False, count=transition.consecutive_failures)
                     or checked_at
                 )
-                incidents_services.open_incident(
+                incident = incidents_services.open_incident(
                     monitor=monitor,
                     started_at=started_at,
                     trigger_error_type=probe_result.error_type,
                     trigger_status_code=probe_result.status_code,
                     failed_checks_count=transition.consecutive_failures,
+                )
+                notifications_services.enqueue_incident_notifications(
+                    incident=incident, event_type=NotificationDelivery.EventType.INCIDENT_OPENED
                 )
             elif transition.health_status == Monitor.HealthStatus.UP:
                 open_incident = incidents_selectors.open_incident_for_monitor(monitor)
@@ -117,10 +125,14 @@ def process_check_result(*, monitor_id, checked_at, probe_result: ProbeResult) -
                         )
                         or checked_at
                     )
-                    incidents_services.resolve_incident(
+                    incident = incidents_services.resolve_incident(
                         incident=open_incident,
                         resolved_at=resolved_at,
                         resolution_source=Incident.ResolutionSource.AUTO_RECOVERY,
+                    )
+                    notifications_services.enqueue_incident_notifications(
+                        incident=incident,
+                        event_type=NotificationDelivery.EventType.INCIDENT_RESOLVED,
                     )
 
     return check_result

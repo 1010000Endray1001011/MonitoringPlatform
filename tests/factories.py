@@ -6,6 +6,7 @@ from apps.accounts.models import User
 from apps.checks.models import CheckResult, MonitorHourlyStat
 from apps.incidents.models import Incident
 from apps.monitors.models import Monitor
+from apps.notifications.models import NotificationChannel
 
 
 class UserFactory(DjangoModelFactory):
@@ -77,3 +78,15 @@ class MonitorHourlyStatFactory(DjangoModelFactory):
     min_response_ms = 80
     max_response_ms = 150
     p95_response_ms = 140
+
+
+class NotificationChannelFactory(DjangoModelFactory):
+    class Meta:
+        model = NotificationChannel
+
+    user = factory.SubFactory(UserFactory)
+    type = NotificationChannel.ChannelType.EMAIL
+    name = factory.Sequence(lambda n: f"Channel {n}")
+    config = factory.Sequence(lambda n: {"email": f"dest{n}@example.com"})
+    is_verified = True
+    is_active = True

@@ -40,7 +40,7 @@ def _full_clean_or_raise(monitor: Monitor) -> None:
         raise DomainError("Invalid monitor configuration.", details=details) from exc
 
 
-def create_monitor(*, user, **fields) -> Monitor:
+def create_monitor(*, user, notification_channel_ids=None, **fields) -> Monitor:
     # Quota is checked here, not as a DB constraint: it's a per-user business
     # rule ("how many monitors can this account have"), not a fact about the
     # Monitor row itself, so it doesn't belong in Monitor's own invariants.
@@ -54,10 +54,15 @@ def create_monitor(*, user, **fields) -> Monitor:
     monitor = Monitor(user=user, next_check_at=timezone.now(), **fields)
     _full_clean_or_raise(monitor)
     monitor.save()
+    # M2M relations can only be set once the row has a pk, so this can't
+    # just be another keyword handled by the setattr loop above (there
+    # isn't one here, but update_monitor below has the same constraint).
+    if notification_channel_ids is not None:
+        monitor.notification_channels.set(notification_channel_ids)
     return monitor
 
 
-def update_monitor(*, monitor: Monitor, **fields) -> Monitor:
+def update_monitor(*, monitor: Monitor, notification_channel_ids=None, **fields) -> Monitor:
     interval_changed = (
         "interval_seconds" in fields and fields["interval_seconds"] != monitor.interval_seconds
     )
@@ -73,6 +78,8 @@ def update_monitor(*, monitor: Monitor, **fields) -> Monitor:
 
     _full_clean_or_raise(monitor)
     monitor.save()
+    if notification_channel_ids is not None:
+        monitor.notification_channels.set(notification_channel_ids)
     return monitor
 
 
