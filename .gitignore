@@ -31,8 +31,6 @@ htmlcov/
 # OS
 .DS_Store
 
-# Not public Docs
-
+# Not public
 ARCHITECTURE.md
-README.md
 docs/

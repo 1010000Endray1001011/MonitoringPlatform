@@ -21,6 +21,13 @@ def test_create_monitor(authenticated_client, user, settings):
     assert Monitor.objects.filter(user=user, name="Prod API").exists()
 
 
+def test_detail_with_a_malformed_uuid_is_a_clean_404(authenticated_client):
+    response = authenticated_client.get("/api/v1/monitors/not-a-uuid/")
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert response.data["error"]["code"] == "not_found"
+
+
 def test_create_monitor_rejects_private_url(authenticated_client, settings):
     settings.MONITORING_ALLOW_PRIVATE_TARGETS = False
 

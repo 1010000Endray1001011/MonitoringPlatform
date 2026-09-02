@@ -40,7 +40,17 @@ class IncidentViewSet(viewsets.ReadOnlyModelViewSet):
             return IncidentListSerializer
         return IncidentDetailSerializer
 
-    @extend_schema(request=None, responses=IncidentDetailSerializer)
+    @extend_schema(
+        request=None,
+        responses=IncidentDetailSerializer,
+        summary="Acknowledge an incident",
+        description=(
+            "Marks an OPEN incident as ACKNOWLEDGED — a human has seen it and is "
+            "aware, without claiming it's fixed. Only valid from OPEN; acknowledging "
+            "an already-ACKNOWLEDGED or RESOLVED incident returns 409. Resolving "
+            "still only ever happens automatically, from the monitor recovering."
+        ),
+    )
     @action(detail=True, methods=["post"])
     def acknowledge(self, request: Request, pk=None) -> Response:
         incident = services.acknowledge_incident(incident=self.get_object())

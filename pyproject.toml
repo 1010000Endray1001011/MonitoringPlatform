@@ -50,6 +50,13 @@ addopts = "--reuse-db --disable-socket --allow-hosts=127.0.0.1,::1"
 source = ["apps", "integrations", "config"]
 omit = ["*/migrations/*", "*/tests/*"]
 
+[tool.coverage.report]
+# A few points below the current ~97%: enough headroom that a single
+# small, legitimately-untested line (a new settings constant, an
+# unreachable defensive branch) doesn't fail CI on its own, while still
+# catching a real drop — e.g. a new module added with no tests at all.
+fail_under = 95
+
 [tool.black]
 line-length = 99
 target-version = ["py312"]

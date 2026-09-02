@@ -36,6 +36,11 @@ def dispatch_due_checks() -> None:
     # any transaction at all.
     with transaction.atomic():
         due_monitors = scheduler.claim_due_monitors()
+        if due_monitors:
+            # Below INFO would hide this from production's default level;
+            # skipped on an empty tick (every 30s, most of them empty on a
+            # small install) so the log isn't dominated by "did nothing".
+            logger.info("dispatching due checks", extra={"monitor_count": len(due_monitors)})
         for monitor in due_monitors:
             # `monitor_id=monitor.id` is a default argument, not a closure
             # over the loop variable — without it every lambda in this loop
@@ -95,11 +100,25 @@ def run_check(self, monitor_id) -> None:
             # was made but there's nowhere left to record it against.
             return
 
+        logger.info(
+            "check completed",
+            extra={
+                "monitor_id": str(monitor.id),
+                "success": result.success,
+                "status_code": result.status_code,
+                "error_type": result.error_type,
+            },
+        )
+
         if result.error_type == CheckResult.ErrorType.INTERNAL_ERROR:
             # The only outcome that's our own fault rather than a fact
             # about the target — everything else (a timeout, a refused
             # connection, an unexpected status) has already been recorded
             # as-is and must not be repeated.
+            logger.warning(
+                "check failed on our end, retrying",
+                extra={"monitor_id": str(monitor.id), "error_message": result.error_message},
+            )
             raise self.retry(
                 exc=RuntimeError(result.error_message or "probe failed for an unknown reason")
             )

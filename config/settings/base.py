@@ -45,6 +45,10 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 AUTH_USER_MODEL = "accounts.User"
 
 MIDDLEWARE = [
+    # First in, last out — every other middleware's request *and* response
+    # phase runs with a request id already bound, including whatever
+    # exception handling happens further down this list.
+    "apps.common.middleware.RequestIDMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -135,6 +139,41 @@ CACHES = {
 }
 
 
+# Logging
+# The "console" formatter is human-readable, meant for a developer's
+# terminal — production.py swaps it for JsonFormatter so stdout there is
+# machine-parseable by whatever log aggregator ends up reading it, without
+# changing anything else (handlers, filters, levels stay identical).
+# Every logger in the process propagates to the root handler below unless
+# it sets propagate=False itself, so apps.*, integrations.*, django.*, and
+# Celery's own loggers all end up going through the same request-id-tagged
+# console output with zero per-app configuration.
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "request_id": {"()": "apps.common.logging_utils.RequestIDLogFilter"},
+    },
+    "formatters": {
+        "console": {
+            "format": "%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "filters": ["request_id"],
+            "formatter": "console",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": env.str("DJANGO_LOG_LEVEL", default="INFO"),
+    },
+}
+
+
 # Django REST Framework
 
 REST_FRAMEWORK = {
@@ -152,12 +191,17 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "apps.common.exceptions.domain_exception_handler",
     "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
+        "apps.common.throttling.FailOpenAnonRateThrottle",
+        "apps.common.throttling.FailOpenUserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
         "anon": "20/min",
         "user": "120/min",
+        # Scoped rates below apply only to views/actions that opt in via
+        # throttle_scope, on top of (not instead of) the blanket anon/user
+        # rates above.
+        "auth_token": "10/min",
+        "monitor_check": "5/min",
     },
 }
 
@@ -170,6 +214,12 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "0.1.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
+    # Without this, drf-spectacular's tag auto-detection uses the first
+    # path segment as the tag for every operation — since every path here
+    # starts with /api/v1/, every single endpoint would land under one
+    # undifferentiated "api" tag in Swagger UI instead of being grouped by
+    # resource (Monitors, Incidents, ...).
+    "SCHEMA_PATH_PREFIX": r"/api/v[0-9]+",
     "ENUM_NAME_OVERRIDES": {
         "DependencyStatusEnum": "apps.common.serializers.DEPENDENCY_STATUS_CHOICES",
         # Incident.status (OPEN/ACKNOWLEDGED/RESOLVED) collides on the bare

@@ -48,7 +48,18 @@ class NotificationChannelViewSet(viewsets.ModelViewSet):
         services.delete_channel(channel=self.get_object())
         return Response(status=204)
 
-    @extend_schema(request=None, responses=NotificationChannelSerializer)
+    @extend_schema(
+        request=None,
+        responses=NotificationChannelSerializer,
+        summary="Send a real test notification through this channel",
+        description=(
+            "Synchronous — the caller waits for the actual send attempt, unlike "
+            "every other notification, which is delivered later via the outbox. "
+            "On success, sets is_verified=true; only verified channels ever "
+            "receive real incident notifications. On failure, the channel is "
+            "returned with is_verified unchanged and last_error/last_error_at set."
+        ),
+    )
     @action(detail=True, methods=["post"])
     def verify(self, request: Request, pk=None) -> Response:
         # Synchronous on purpose (apps.notifications.services.verify_channel)

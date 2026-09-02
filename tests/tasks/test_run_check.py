@@ -6,6 +6,8 @@ a fake instead of making real HTTP calls. `CELERY_TASK_ALWAYS_EAGER` means
 second attempt is visible within the same test.
 """
 
+import logging
+
 import pytest
 from celery.exceptions import Retry
 from django.core.cache import cache
@@ -30,6 +32,19 @@ def test_records_a_successful_probe_and_updates_health_status(monkeypatch):
     assert monitor.health_status == Monitor.HealthStatus.UP
     assert CheckResult.objects.filter(monitor=monitor, success=True).exists()
     assert len(fake.calls) == 1
+
+
+def test_logs_the_outcome_tagged_with_the_monitor_id(monkeypatch, caplog):
+    monitor = MonitorFactory(health_status=Monitor.HealthStatus.NEW, success_threshold=1)
+    fake = FakeHttpProbe(ProbeResult(success=True, status_code=200, response_time_ms=42))
+    monkeypatch.setattr(tasks, "get_http_probe", lambda: fake)
+
+    with caplog.at_level(logging.INFO, logger="apps.checks.tasks"):
+        tasks.run_check(monitor.id)
+
+    [record] = [r for r in caplog.records if r.message == "check completed"]
+    assert record.monitor_id == str(monitor.id)
+    assert record.success is True
 
 
 def test_a_monitor_that_no_longer_exists_is_handled_silently(monkeypatch):

@@ -50,7 +50,7 @@ def create_monitor(*, user, notification_channel_ids=None, **fields) -> Monitor:
         )
 
     # A brand-new monitor is due for its first check immediately — the next
-    # dispatcher tick (every 30s, Chunk 3) will pick it up.
+    # dispatcher tick (every 30s) will pick it up.
     monitor = Monitor(user=user, next_check_at=timezone.now(), **fields)
     _full_clean_or_raise(monitor)
     monitor.save()

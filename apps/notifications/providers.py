@@ -22,14 +22,34 @@ class NotificationProvider(Protocol):
 
 class EmailProvider:
     def send(self, config: dict, *, subject: str, message: str) -> SendResult:
-        return send_email(config["email"], subject, message)
+        # Model validation (NotificationChannel.clean) already keeps a
+        # freshly-created channel from ever having a config missing this
+        # key, but that's a save-time guarantee, not a permanent one — a
+        # channel written before a config schema change, or edited by hand
+        # through the admin, could still reach here without it. Every
+        # provider in this module is required to never raise (see the
+        # module docstring's "never mock requests/SMTP directly" premise —
+        # callers only ever branch on SendResult), so a config problem is
+        # reported the same way a "chat not found" from Telegram is: a
+        # permanent error about this specific channel, not a crash.
+        email = config.get("email")
+        if not email:
+            return SendResult(
+                success=False, permanent_error=True, error_message="Channel has no email address."
+            )
+        return send_email(email, subject, message)
 
 
 class TelegramProvider:
     def send(self, config: dict, *, subject: str, message: str) -> SendResult:
+        chat_id = config.get("chat_id")
+        if not chat_id:
+            return SendResult(
+                success=False, permanent_error=True, error_message="Channel has no chat_id."
+            )
         # Telegram messages have no separate subject line — folding it
         # into the text is simpler than dropping it on the floor.
-        return send_telegram_message(config["chat_id"], f"{subject}\n\n{message}")
+        return send_telegram_message(chat_id, f"{subject}\n\n{message}")
 
 
 _PROVIDERS: dict[str, NotificationProvider] = {

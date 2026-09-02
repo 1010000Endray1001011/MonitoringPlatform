@@ -51,14 +51,24 @@ def deliver_notification(self, delivery_id) -> None:
     except NotificationDelivery.DoesNotExist:
         return
 
+    log_context = {
+        "delivery_id": str(delivery_id),
+        "monitor_id": str(delivery.incident.monitor_id),
+        "channel_type": delivery.channel.type,
+    }
+
     result = services.attempt_delivery(delivery=delivery)
     if result is None or result.success or result.permanent_error:
         # Nothing left to do, it worked, or retrying would be pointless —
         # attempt_delivery already recorded the right terminal status (or
         # left the row exactly as some other worker's attempt did).
+        if result is not None:
+            level = logging.INFO if result.success else logging.WARNING
+            logger.log(level, "notification delivery finished", extra=log_context)
         return
 
     if self.request.retries >= self.max_retries:
+        logger.warning("notification delivery exhausted retries", extra=log_context)
         services.mark_delivery_failed(
             delivery=delivery,
             error_message=result.error_message or "delivery failed after all retries",
@@ -66,6 +76,10 @@ def deliver_notification(self, delivery_id) -> None:
         return
 
     countdown = result.retry_after or _backoff_seconds(self.request.retries)
+    logger.info(
+        "notification delivery temporarily failed, retrying",
+        extra={**log_context, "countdown": countdown},
+    )
     raise self.retry(
         exc=RuntimeError(result.error_message or "temporary delivery failure"),
         countdown=countdown,

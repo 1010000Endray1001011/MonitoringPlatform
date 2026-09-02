@@ -2,6 +2,7 @@ import pytest
 from rest_framework import status
 
 from apps.accounts.models import User
+from tests.factories import MonitorFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -98,3 +99,12 @@ def test_me_returns_current_user(authenticated_client, user):
     assert response.status_code == status.HTTP_200_OK
     assert response.data["email"] == user.email
     assert response.data["monitors_used"] == 0
+
+
+def test_me_reflects_the_users_actual_monitor_count(authenticated_client, user):
+    MonitorFactory.create_batch(3, user=user)
+    MonitorFactory()  # another user's monitor — must not be counted here
+
+    response = authenticated_client.get("/api/v1/auth/me")
+
+    assert response.data["monitors_used"] == 3

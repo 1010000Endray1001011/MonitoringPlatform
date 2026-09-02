@@ -96,6 +96,9 @@ jobs:
           EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
         run: poetry run python manage.py check --deploy --settings=config.settings.production
 
+      - name: OpenAPI schema generates without warnings
+        run: poetry run python manage.py spectacular --file /tmp/schema.yaml --fail-on-warn
+
       - name: Run tests
         run: poetry run pytest --cov --cov-report=term-missing
 

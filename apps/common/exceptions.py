@@ -1,3 +1,5 @@
+from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+from django.http import Http404
 from rest_framework import exceptions as drf_exceptions
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
@@ -55,6 +57,19 @@ def domain_exception_handler(exc, context):
             {"error": {"code": exc.code, "message": exc.message, "details": exc.details}},
             status=exc.status_code,
         )
+
+    # DRF's own exception_handler does this same translation internally
+    # before building its Response, but only internally — it hands back a
+    # Response, not the translated exception, so without doing it here too
+    # `_code_for(exc)` below would still see the untranslated Http404 /
+    # PermissionDenied and miss the "not_found" / "permission_denied"
+    # mapping entirely (falling back to a bare, message-less "error").
+    # A get_object_or_404-style lookup with a malformed lookup value (e.g.
+    # a path segment that isn't a valid UUID) surfaces exactly this way.
+    if isinstance(exc, Http404):
+        exc = drf_exceptions.NotFound(*exc.args)
+    elif isinstance(exc, DjangoPermissionDenied):
+        exc = drf_exceptions.PermissionDenied(*exc.args)
 
     response = drf_exception_handler(exc, context)
     if response is None:

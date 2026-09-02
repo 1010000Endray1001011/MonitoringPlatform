@@ -9,7 +9,7 @@ from datetime import timedelta
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import filters, permissions, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
@@ -26,6 +26,7 @@ from apps.checks.serializers import (
 )
 from apps.common.pagination import CheckResultCursorPagination
 from apps.common.permissions import IsOwner
+from apps.common.throttling import FailOpenScopedRateThrottle
 from apps.incidents import selectors as incidents_selectors
 
 from . import services
@@ -65,6 +66,11 @@ def _parse_datetime_param(value: str | None):
 
 class MonitorViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOwner]
+    # None at the class level — only the check_now action overrides this
+    # (via its @action kwargs) to opt into the tighter monitor_check rate.
+    # DRF's router requires the attribute to already exist on the class for
+    # any per-action override to be accepted at all.
+    throttle_scope = None
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = MonitorFilterSet
@@ -161,8 +167,27 @@ class MonitorViewSet(viewsets.ModelViewSet):
         page = paginator.paginate_queryset(queryset, request)
         return paginator.get_paginated_response(CheckResultSerializer(page, many=True).data)
 
-    @extend_schema(request=None, responses=ImmediateCheckAcceptedSerializer)
-    @action(detail=True, methods=["post"], url_path="check")
+    @extend_schema(
+        request=None,
+        responses={202: ImmediateCheckAcceptedSerializer},
+        summary="Queue an immediate check outside the regular schedule",
+        description=(
+            "Always asynchronous — the request returns 202 as soon as the check "
+            "is queued, never waiting on the probe itself, since the target could "
+            "be slow or unreachable. Poll poll_url (the same paginated check "
+            "history endpoint) to see the result once it lands. Rate limited to "
+            "5/min per user: this endpoint lets a caller make our infrastructure "
+            "send a request to an arbitrary URL, so it's deliberately tighter "
+            "than the general per-user rate."
+        ),
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="check",
+        throttle_classes=[FailOpenScopedRateThrottle],
+        throttle_scope="monitor_check",
+    )
     def check_now(self, request: Request, pk=None) -> Response:
         monitor = self.get_object()
         # Never runs the probe inline — this only ever enqueues it. The
@@ -177,7 +202,27 @@ class MonitorViewSet(viewsets.ModelViewSet):
             status=202,
         )
 
-    @extend_schema(responses=MonitorStatsSerializer)
+    @extend_schema(
+        responses=MonitorStatsSerializer,
+        summary="Uptime and response-time summary over a period",
+        description=(
+            "Built entirely from pre-aggregated MonitorHourlyStat rows, never "
+            "from raw CheckResult history — cheap regardless of how far back "
+            "`period` reaches. `series` is bucketed by hour for period=24h and "
+            "by day for 7d/30d. p95_response_time_ms is a weighted average of "
+            "each hour's own p95, not a true period-wide percentile — a "
+            "documented approximation, not a bug."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="period",
+                type=str,
+                enum=list(_STATS_PERIODS),
+                default="24h",
+                description="How far back to summarize.",
+            ),
+        ],
+    )
     @action(detail=True, methods=["get"])
     def stats(self, request: Request, pk=None) -> Response:
         monitor = self.get_object()

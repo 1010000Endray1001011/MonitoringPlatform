@@ -20,3 +20,17 @@ SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=31536000)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# Same handlers/filters/root as base.py — only the formatter changes, so
+# stdout here is one JSON object per line instead of the human-readable
+# line format local/test use. A full reassignment (not a nested mutation
+# of the dict from base.py) since `from .base import *` binds this module's
+# LOGGING name to the *same* dict object base.py built, and settings
+# modules elsewhere in this project (see CACHES in test.py) follow the
+# same reassign-don't-mutate convention for exactly that reason.
+LOGGING = {
+    **LOGGING,  # noqa: F405
+    "formatters": {
+        "console": {"()": "apps.common.logging_utils.JsonFormatter"},
+    },
+}
