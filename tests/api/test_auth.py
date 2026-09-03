@@ -1,4 +1,5 @@
 import pytest
+from django.conf import settings
 from rest_framework import status
 
 from apps.accounts.models import User
@@ -58,14 +59,30 @@ def test_register_weak_password_rejected(api_client):
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
-def test_token_obtain_pair_returns_tokens(api_client, user):
+def test_token_obtain_pair_returns_access_only_in_the_body(api_client, user):
     response = api_client.post(
         "/api/v1/auth/token", {"email": user.email, "password": "TestPass123!"}
     )
 
     assert response.status_code == status.HTTP_200_OK
     assert "access" in response.data
-    assert "refresh" in response.data
+    # The refresh token must never appear where a script on the page could
+    # read it — it goes out as a cookie only, checked separately below.
+    assert "refresh" not in response.data
+
+
+def test_token_obtain_pair_sets_an_httponly_refresh_cookie(api_client, user):
+    response = api_client.post(
+        "/api/v1/auth/token", {"email": user.email, "password": "TestPass123!"}
+    )
+
+    cookie = response.cookies[settings.JWT_REFRESH_COOKIE_NAME]
+    assert cookie.value
+    assert cookie["httponly"]
+    assert cookie["samesite"] == settings.JWT_REFRESH_COOKIE_SAMESITE
+    # Scoped to the auth endpoints only — see _set_refresh_cookie's comment
+    # for why this isn't just "/".
+    assert cookie["path"] == "/api/v1/auth/"
 
 
 def test_token_obtain_pair_rejects_invalid_credentials(api_client, user):
@@ -76,15 +93,52 @@ def test_token_obtain_pair_rejects_invalid_credentials(api_client, user):
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
-def test_token_refresh_returns_new_access_token(api_client, user):
-    obtain = api_client.post(
-        "/api/v1/auth/token", {"email": user.email, "password": "TestPass123!"}
-    )
+def test_token_refresh_reads_the_cookie_set_by_login(api_client, user):
+    # No body on the refresh call — api_client is a stateful test client
+    # that carries cookies between requests the same way a browser would,
+    # so the cookie login just set is what gets sent here.
+    api_client.post("/api/v1/auth/token", {"email": user.email, "password": "TestPass123!"})
 
-    response = api_client.post("/api/v1/auth/token/refresh", {"refresh": obtain.data["refresh"]})
+    response = api_client.post("/api/v1/auth/token/refresh")
 
     assert response.status_code == status.HTTP_200_OK
     assert "access" in response.data
+    assert "refresh" not in response.data
+
+
+def test_token_refresh_rotates_the_cookie(api_client, user):
+    login = api_client.post(
+        "/api/v1/auth/token", {"email": user.email, "password": "TestPass123!"}
+    )
+    original_refresh = login.cookies[settings.JWT_REFRESH_COOKIE_NAME].value
+
+    response = api_client.post("/api/v1/auth/token/refresh")
+
+    rotated_refresh = response.cookies[settings.JWT_REFRESH_COOKIE_NAME].value
+    assert rotated_refresh != original_refresh
+
+
+def test_token_refresh_without_a_cookie_is_rejected(api_client):
+    response = api_client.post("/api/v1/auth/token/refresh")
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_logout_clears_the_refresh_cookie(api_client, user):
+    api_client.post("/api/v1/auth/token", {"email": user.email, "password": "TestPass123!"})
+
+    response = api_client.post("/api/v1/auth/logout")
+
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+    cookie = response.cookies[settings.JWT_REFRESH_COOKIE_NAME]
+    assert cookie.value == ""
+    assert cookie["max-age"] == 0
+
+
+def test_logout_works_without_being_logged_in(api_client):
+    response = api_client.post("/api/v1/auth/logout")
+
+    assert response.status_code == status.HTTP_204_NO_CONTENT
 
 
 def test_me_requires_authentication(api_client):

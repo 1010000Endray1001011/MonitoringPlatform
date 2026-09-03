@@ -42,3 +42,17 @@ class MeSerializer(serializers.ModelSerializer):
         model = User
         fields = ["id", "email", "monitor_quota", "monitors_used", "created_at"]
         read_only_fields = fields
+
+
+class AccessTokenSerializer(serializers.Serializer):
+    """
+    The real response shape of both /auth/token and /auth/token/refresh —
+    used only for schema generation (@extend_schema in views.py), never
+    instantiated to build an actual response. Documents that `refresh`
+    deliberately isn't here; it goes out as an httpOnly cookie instead of
+    in this body, so a naive schema built from SimpleJWT's own serializers
+    (which do include `refresh`) would document a field that never
+    actually appears.
+    """
+
+    access = serializers.CharField(read_only=True)

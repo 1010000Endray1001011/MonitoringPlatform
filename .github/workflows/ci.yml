@@ -64,6 +64,7 @@ jobs:
       SECRET_KEY: ci-only-secret-key-not-used-anywhere-else
       DEBUG: "False"
       ALLOWED_HOSTS: "localhost,127.0.0.1"
+      CORS_ALLOWED_ORIGINS: "http://localhost:5173"
       DATABASE_URL: postgres://monitoringplatform:monitoringplatform@localhost:5432/monitoringplatform
       REDIS_URL: redis://localhost:6379/0
       MONITORING_ALLOW_PRIVATE_TARGETS: "False"
@@ -106,3 +107,74 @@ jobs:
         with:
           name: coverage-report
           path: .coverage
+
+  frontend:
+    runs-on: ubuntu-latest
+
+    env:
+      SECRET_KEY: ci-only-secret-key-not-used-anywhere-else
+      DATABASE_URL: postgres://x:x@localhost:5432/x
+      REDIS_URL: redis://localhost:6379/0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Format check
+        working-directory: frontend
+        run: npm run format:check
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Unit tests
+        working-directory: frontend
+        run: npm run test:run
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      # manage.py spectacular only needs settings to be importable, not a
+      # live database — no postgres/redis services needed just for this,
+      # unlike the backend `test` job above.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: pipx install poetry==${{ env.POETRY_VERSION }}
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Install backend dependencies
+        run: poetry install --no-root
+
+      - name: Generate a fresh OpenAPI schema
+        run: poetry run python manage.py spectacular --file /tmp/schema.yaml --fail-on-warn
+
+      - name: Check generated types match the committed ones
+        working-directory: frontend
+        run: |
+          node scripts/generate-types.mjs /tmp/schema.yaml
+          git diff --exit-code src/api/schema.ts || {
+            echo "::error::frontend/src/api/schema.ts is out of date — run 'npm run generate-types' against the backend and commit the result."
+            exit 1
+          }

@@ -13,6 +13,15 @@ if MONITORING_ALLOW_PRIVATE_TARGETS:  # noqa: F405
         "— it disables the SSRF guard that keeps monitors off private networks."
     )
 
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS")
+
+if not CORS_ALLOWED_ORIGINS:
+    raise RuntimeError("CORS_ALLOWED_ORIGINS must be set explicitly in production.")
+
+# base.py defaults this to False since local/test run over plain http — the
+# refresh cookie must be Secure wherever it can actually travel over https.
+JWT_REFRESH_COOKIE_SECURE = True
+
 SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=True)
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True

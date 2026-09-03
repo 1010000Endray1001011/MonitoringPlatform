@@ -29,6 +29,7 @@ THIRD_PARTY_APPS = [
     "rest_framework_simplejwt",
     "drf_spectacular",
     "django_filters",
+    "corsheaders",
 ]
 
 LOCAL_APPS = [
@@ -50,6 +51,11 @@ MIDDLEWARE = [
     # exception handling happens further down this list.
     "apps.common.middleware.RequestIDMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # Must sit above CommonMiddleware (and anything else that can produce a
+    # response) — otherwise responses generated before this point in the
+    # chain never get the CORS headers added, and the browser blocks the
+    # frontend from reading them even though the request itself succeeded.
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -238,6 +244,34 @@ SIMPLE_JWT = {
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
 }
+
+
+# CORS
+# Only the frontend origin(s) may call this API from a browser; there is no
+# wildcard, and there cannot be one — CORS_ALLOW_CREDENTIALS=True (needed so
+# the browser sends the httpOnly refresh cookie below) is rejected by every
+# browser when paired with Access-Control-Allow-Origin: *.
+
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+CORS_ALLOW_CREDENTIALS = True
+
+
+# Auth: refresh token cookie
+# apps.accounts.views.CookieTokenObtainPairView/CookieTokenRefreshView read
+# and write this cookie instead of putting the refresh token in the JSON
+# response body — see apps/accounts/views.py for the full reasoning.
+
+JWT_REFRESH_COOKIE_NAME = "refresh_token"
+# Off by default (base/local/test all run over plain http); production.py
+# turns this on, since a non-Secure cookie over https is sent in the clear
+# on any http fallback and browsers increasingly refuse to set it at all.
+JWT_REFRESH_COOKIE_SECURE = False
+# Lax, not Strict: Strict would drop the cookie on a user opening the app
+# from a link in another site/tab (a normal top-level GET navigation) until
+# they navigate again from within the app. Lax still blocks the cookie from
+# being attached to any cross-site POST, which is what actually matters for
+# CSRF on the refresh endpoint.
+JWT_REFRESH_COOKIE_SAMESITE = "Lax"
 
 
 # Celery
