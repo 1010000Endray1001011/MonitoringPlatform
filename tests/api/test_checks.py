@@ -12,6 +12,20 @@ from tests.factories import CheckResultFactory, MonitorFactory, UserFactory
 pytestmark = pytest.mark.django_db
 
 
+def test_history_response_matches_the_documented_cursor_shape(authenticated_client, user):
+    monitor = MonitorFactory(user=user)
+    CheckResultFactory(monitor=monitor)
+
+    response = authenticated_client.get(f"/api/v1/monitors/{monitor.id}/checks/")
+
+    # Cursor pagination (CheckResultCursorPagination), not page-number — no
+    # `count` key. The OpenAPI schema for this endpoint used to imply
+    # otherwise (see CheckResultCursorPageSerializer for why); this pins
+    # the real response shape down so schema and behavior can't drift back
+    # apart silently.
+    assert set(response.data.keys()) == {"next", "previous", "results"}
+
+
 def test_history_is_ordered_newest_first(authenticated_client, user):
     monitor = MonitorFactory(user=user)
     older = CheckResultFactory(monitor=monitor, checked_at=timezone.now() - timedelta(hours=1))

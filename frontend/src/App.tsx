@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { DashboardPage } from './routes/DashboardPage'
 import { LoginPage } from './routes/LoginPage'
+import { MonitorDetailPage } from './routes/MonitorDetailPage'
 import { ProtectedRoute } from './routes/ProtectedRoute'
 import { RegisterPage } from './routes/RegisterPage'
 
@@ -12,6 +13,7 @@ export function App() {
         <Route path="/register" element={<RegisterPage />} />
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/monitors/:id" element={<MonitorDetailPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

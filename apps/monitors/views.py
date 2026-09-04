@@ -9,6 +9,7 @@ from datetime import timedelta
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import filters, permissions, serializers, viewsets
 from rest_framework.decorators import action
@@ -20,6 +21,7 @@ from apps.checks import stats as stats_module
 from apps.checks.models import MonitorHourlyStat
 from apps.checks.selectors import annotate_last_response_time, check_results_for_monitor
 from apps.checks.serializers import (
+    CheckResultCursorPageSerializer,
     CheckResultSerializer,
     ImmediateCheckAcceptedSerializer,
     MonitorStatsSerializer,
@@ -143,7 +145,42 @@ class MonitorViewSet(viewsets.ModelViewSet):
         monitor = services.resume_monitor(monitor=self.get_object())
         return Response(MonitorStatusSerializer(monitor).data)
 
-    @extend_schema(responses=CheckResultSerializer(many=True))
+    @extend_schema(
+        # None of these come from a filterset — the ViewSet's own
+        # DjangoFilterBackend/SearchFilter/OrderingFilter apply to the list
+        # action's monitors, not to this nested action's check results, so
+        # without an explicit parameter list here drf-spectacular would
+        # otherwise document those (wrong) filters instead of the ones this
+        # view actually reads off request.query_params below.
+        parameters=[
+            OpenApiParameter(
+                name="success", type=bool, required=False, description="Filter by outcome."
+            ),
+            OpenApiParameter(
+                name="error_type", type=str, required=False, description="Filter by error type."
+            ),
+            OpenApiParameter(
+                name="since",
+                type=OpenApiTypes.DATETIME,
+                required=False,
+                description="Only checks at or after this time.",
+            ),
+            OpenApiParameter(
+                name="until",
+                type=OpenApiTypes.DATETIME,
+                required=False,
+                description="Only checks before this time.",
+            ),
+            OpenApiParameter(
+                name="cursor",
+                type=str,
+                required=False,
+                description="Opaque pagination cursor from a previous response's next/previous.",
+            ),
+            OpenApiParameter(name="page_size", type=int, required=False),
+        ],
+        responses=CheckResultCursorPageSerializer,
+    )
     @action(detail=True, methods=["get"])
     def checks(self, request: Request, pk=None) -> Response:
         monitor = self.get_object()

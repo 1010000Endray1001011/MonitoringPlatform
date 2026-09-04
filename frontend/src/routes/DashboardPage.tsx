@@ -1,24 +1,96 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Window, WindowContent, WindowHeader } from 'react95'
+import { Button, TextInput, Window, WindowContent, WindowHeader } from 'react95'
 import { logout } from '../auth/logout'
+import { useMonitors, usePauseMonitor, useResumeMonitor } from '../api/monitors'
+import type { MonitorList } from '../api/types'
+import { CreateMonitorForm } from '../components/CreateMonitorForm'
+import { MonitorCard } from '../components/MonitorCard'
 
-// Placeholder only — the real monitor list, creation form, and live status
-// are a separate, later piece of work. This exists so the protected-route
-// and auth flow have somewhere real to land and be checked by hand.
+// Fires the search request 300ms after the user stops typing rather than
+// on every keystroke — the backend's search filter is cheap, but there's
+// nothing to gain from a fresh request per character either.
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs)
+    return () => clearTimeout(timer)
+  }, [value, delayMs])
+  return debounced
+}
+
 export function DashboardPage() {
   const navigate = useNavigate()
+  const [searchInput, setSearchInput] = useState('')
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const search = useDebouncedValue(searchInput, 300)
+
+  const monitors = useMonitors({ search: search || undefined })
+  const pauseMonitor = usePauseMonitor()
+  const resumeMonitor = useResumeMonitor()
 
   async function handleLogout() {
     await logout()
     navigate('/login', { replace: true })
   }
 
+  function handleTogglePause(monitor: MonitorList) {
+    if (monitor.is_enabled) {
+      pauseMonitor.mutate(monitor.id)
+    } else {
+      resumeMonitor.mutate(monitor.id)
+    }
+  }
+
+  function isToggling(id: string): boolean {
+    return (
+      (pauseMonitor.isPending && pauseMonitor.variables === id) ||
+      (resumeMonitor.isPending && resumeMonitor.variables === id)
+    )
+  }
+
   return (
     <Window>
       <WindowHeader>Dashboard</WindowHeader>
       <WindowContent>
-        <p>You're logged in.</p>
         <Button onClick={handleLogout}>Log out</Button>
+
+        {showCreateForm ? (
+          <CreateMonitorForm
+            onCreated={() => setShowCreateForm(false)}
+            onCancel={() => setShowCreateForm(false)}
+          />
+        ) : (
+          <>
+            <TextInput
+              placeholder="Search monitors"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+            />
+            <Button onClick={() => setShowCreateForm(true)}>New monitor</Button>
+
+            {monitors.isLoading && <p>Loading…</p>}
+            {monitors.isError && <p role="alert">Couldn't load your monitors. Try reloading.</p>}
+
+            {monitors.data && monitors.data.results.length === 0 && (
+              <p>
+                {search
+                  ? 'No monitors match your search.'
+                  : "You don't have any monitors yet — create your first one to start tracking uptime."}
+              </p>
+            )}
+
+            {monitors.data?.results.map((monitor) => (
+              <MonitorCard
+                key={monitor.id}
+                monitor={monitor}
+                onOpen={(id) => navigate(`/monitors/${id}`)}
+                onTogglePause={handleTogglePause}
+                isToggling={isToggling(monitor.id)}
+              />
+            ))}
+          </>
+        )}
       </WindowContent>
     </Window>
   )

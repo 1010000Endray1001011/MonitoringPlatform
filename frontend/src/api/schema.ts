@@ -195,7 +195,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["monitors_checks_list"];
+        get: operations["monitors_checks_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -350,6 +350,24 @@ export interface components {
             readonly error_type: (components["schemas"]["ErrorTypeEnum"] | components["schemas"]["NullEnum"]) | null;
             readonly error_message: string | null;
             readonly response_size_bytes: number | null;
+        };
+        /**
+         * @description Schema-only — documents what CheckResultCursorPagination actually
+         *     returns (apps.common.pagination), not instantiated at runtime.
+         *
+         *     Exists because the checks history view builds its paginator by hand
+         *     instead of going through the ViewSet's normal pagination_class wiring
+         *     (see apps/monitors/views.py for why), which means drf-spectacular has
+         *     no way to detect on its own that this response is paginated at all,
+         *     let alone paginated with a cursor instead of a page number — left to
+         *     its own inference it wrongly assumes the ViewSet's default
+         *     page-number pagination, complete with a `count` field this endpoint
+         *     never actually returns.
+         */
+        CheckResultCursorPage: {
+            next: string | null;
+            previous: string | null;
+            results: components["schemas"]["CheckResult"][];
         };
         /**
          * @description * `ok` - ok
@@ -610,21 +628,6 @@ export interface components {
         };
         /** @enum {unknown} */
         NullEnum: null;
-        PaginatedCheckResultList: {
-            /** @example 123 */
-            count: number;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=4
-             */
-            next?: string | null;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=2
-             */
-            previous?: string | null;
-            results: components["schemas"]["CheckResult"][];
-        };
         PaginatedIncidentListList: {
             /** @example 123 */
             count: number;
@@ -1149,18 +1152,20 @@ export interface operations {
             };
         };
     };
-    monitors_checks_list: {
+    monitors_checks_retrieve: {
         parameters: {
             query?: {
-                /** @description Which field to use when ordering the results. */
-                ordering?: string;
-                /** @description A page number within the paginated result set. */
-                page?: number;
-                /** @description Number of results to return per page. */
+                /** @description Opaque pagination cursor from a previous response's next/previous. */
+                cursor?: string;
+                /** @description Filter by error type. */
+                error_type?: string;
                 page_size?: number;
-                /** @description A search term. */
-                search?: string;
-                status?: string;
+                /** @description Only checks at or after this time. */
+                since?: string;
+                /** @description Filter by outcome. */
+                success?: boolean;
+                /** @description Only checks before this time. */
+                until?: string;
             };
             header?: never;
             path: {
@@ -1176,7 +1181,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedCheckResultList"];
+                    "application/json": components["schemas"]["CheckResultCursorPage"];
                 };
             };
         };
