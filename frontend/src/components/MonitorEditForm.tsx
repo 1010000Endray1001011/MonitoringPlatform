@@ -1,13 +1,5 @@
 import { type FormEvent, useState } from 'react'
-import {
-  Button,
-  NumberInput,
-  SelectNative,
-  TextInput,
-  Window,
-  WindowContent,
-  WindowHeader,
-} from 'react95'
+import { Button, SelectNative, TextInput, Window, WindowContent, WindowHeader } from 'react95'
 import { describeNonFieldError, extractFieldErrors } from '../api/errors'
 import { useUpdateMonitor } from '../api/monitorDetail'
 import { useNotificationChannels } from '../api/notificationChannels'
@@ -99,7 +91,21 @@ export function MonitorEditForm({ monitor, onSaved, onCancel }: MonitorEditFormP
 
           <label>
             Expected status code
-            <NumberInput min={100} max={599} value={expectedStatus} onChange={setExpectedStatus} />
+            {/* react95's NumberInput only ever calls onChange from its
+                increment/decrement buttons — for a controlled instance
+                (value + onChange, the only sane way to use it), its
+                internal useControlledOrUncontrolled hook makes the
+                typed-input handler a no-op, so typing a value does
+                nothing at all. TextInput type="number" is the same
+                underlying primitive NumberInput itself wraps, minus the
+                broken bridge. */}
+            <TextInput
+              type="number"
+              min={100}
+              max={599}
+              value={expectedStatus}
+              onChange={(event) => setExpectedStatus(Number(event.target.value))}
+            />
           </label>
           {fieldErrors.expected_status && <p role="alert">{fieldErrors.expected_status}</p>}
 
@@ -114,7 +120,13 @@ export function MonitorEditForm({ monitor, onSaved, onCancel }: MonitorEditFormP
 
           <label>
             Timeout (seconds)
-            <NumberInput min={1} max={30} value={timeoutSeconds} onChange={setTimeoutSeconds} />
+            <TextInput
+              type="number"
+              min={1}
+              max={30}
+              value={timeoutSeconds}
+              onChange={(event) => setTimeoutSeconds(Number(event.target.value))}
+            />
           </label>
           {fieldErrors.timeout_seconds && <p role="alert">{fieldErrors.timeout_seconds}</p>}
 

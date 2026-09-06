@@ -3,11 +3,17 @@ import { styleReset } from 'react95'
 import ms_sans_serif from 'react95/dist/fonts/ms_sans_serif.woff2'
 import ms_sans_serif_bold from 'react95/dist/fonts/ms_sans_serif_bold.woff2'
 
-// The actual retro theming (palette, cyberpunk accents) is a separate,
-// later pass once every screen already exists — this is only the minimum
-// React95 needs to render its components correctly at all: the CSS reset
-// it ships with, and its own bitmap font (without it, every component
-// still works, just in whatever the browser's default sans-serif is).
+// styleReset + the bitmap font are what React95 needs to render its
+// components correctly at all — unrelated to the theming pass below, just
+// grouped in the same file since both are truly global CSS.
+//
+// The body background is the "desktop" a Win95 window normally floats on
+// (real Windows used a flat teal here — `theme.desktopBackground` still
+// exists as that same token, just repurposed toward the cyberpunk violet
+// this pass introduces). The two repeating-linear-gradients on top of it
+// are a faint cyan grid — cheap to do in CSS, and it reads as "cyberpunk
+// desktop" without building an actual desktop-icons/taskbar metaphor,
+// which ADR-025 / the ROADMAP's cut-list explicitly leave optional.
 export const GlobalStyles = createGlobalStyle`
   ${styleReset}
 
@@ -26,5 +32,22 @@ export const GlobalStyles = createGlobalStyle`
 
   body {
     font-family: 'ms_sans_serif';
+    min-height: 100vh;
+    background-color: ${({ theme }) => theme.desktopBackground};
+    background-image:
+      repeating-linear-gradient(
+        0deg,
+        rgba(0, 255, 242, 0.06) 0px,
+        rgba(0, 255, 242, 0.06) 1px,
+        transparent 1px,
+        transparent 40px
+      ),
+      repeating-linear-gradient(
+        90deg,
+        rgba(0, 255, 242, 0.06) 0px,
+        rgba(0, 255, 242, 0.06) 1px,
+        transparent 1px,
+        transparent 40px
+      );
   }
 `

@@ -19,7 +19,15 @@ export function useAuthBootstrap() {
       setReady(true)
       return
     }
-    refreshAccessToken().finally(() => setReady(true))
+    // refreshAccessToken() rejects (rather than resolving null) when the
+    // request itself fails outright — the backend unreachable, offline,
+    // CORS misconfigured — as opposed to a clean "no session" 401. Either
+    // way the outcome here is the same (no token, ProtectedRoute sends the
+    // visitor to /login), so the rejection is only caught to keep it from
+    // surfacing as an unhandled promise rejection, not acted on further.
+    refreshAccessToken()
+      .catch(() => undefined)
+      .finally(() => setReady(true))
     // Runs once on mount only. Re-running this whenever accessToken changes
     // would also fire it right after a successful login, refreshing a token
     // that was just issued a moment ago for no reason.

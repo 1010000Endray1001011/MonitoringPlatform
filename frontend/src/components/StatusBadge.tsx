@@ -1,9 +1,10 @@
 import styled from 'styled-components'
+import { criticalGlow } from '../theme/criticalGlow'
 
-// Functional color-coding, not the retro theme itself — a monitor that's
-// DOWN needs to read as "wrong" at a glance regardless of what the
-// eventual visual pass looks like, so these four colors exist now rather
-// than waiting on that later pass.
+// Functional color-coding, chosen in Chunk 8 before the theming pass and
+// left as-is here — DOWN/UP/PAUSED/NEW already have good contrast against
+// the white text they carry (verified during the Chunk 11 pass), so only
+// the glow is new, not the colors themselves.
 const COLORS: Record<string, string> = {
   UP: '#0a7d1f',
   DOWN: '#b30000',
@@ -11,14 +12,19 @@ const COLORS: Record<string, string> = {
   NEW: '#0033a0',
 }
 
-const Badge = styled.span<{ $color: string }>`
+const Badge = styled.span<{ $color: string; $critical: boolean }>`
   display: inline-block;
   padding: 2px 8px;
   font-weight: bold;
   color: white;
   background-color: ${(props) => props.$color};
+  ${(props) => props.$critical && criticalGlow}
 `
 
 export function StatusBadge({ status }: { status: string }) {
-  return <Badge $color={COLORS[status] ?? COLORS.NEW}>{status}</Badge>
+  return (
+    <Badge $color={COLORS[status] ?? COLORS.NEW} $critical={status === 'DOWN'}>
+      {status}
+    </Badge>
+  )
 }

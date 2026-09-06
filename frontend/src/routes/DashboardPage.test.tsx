@@ -91,6 +91,45 @@ describe('DashboardPage', () => {
     expect(await screen.findByText('Detail placeholder')).toBeInTheDocument()
   })
 
+  it('submits typed values for expected status and timeout, not the defaults', async () => {
+    // Regression test: react95's NumberInput only calls onChange from its
+    // increment/decrement buttons — for a controlled instance (value +
+    // onChange), typing into the field does nothing at all, because its
+    // internal useControlledOrUncontrolled hook makes the typed-input
+    // handler a no-op. Found live in the browser (typing "404" left the
+    // field showing "200"); fixed by switching both fields to
+    // TextInput type="number". This test is what should have caught it.
+    let submittedBody: { expected_status?: number; timeout_seconds?: number } | undefined
+    let created = false
+    server.use(
+      http.get(`${BASE}/api/v1/monitors/`, () =>
+        HttpResponse.json(paginated(created ? [makeMonitor({ name: 'New Site' })] : [])),
+      ),
+      http.post(`${BASE}/api/v1/monitors/`, async ({ request }) => {
+        submittedBody = await request.json()
+        created = true
+        return HttpResponse.json(makeMonitor({ name: 'New Site' }), { status: 201 })
+      }),
+    )
+    renderDashboard()
+    await screen.findByText(/don't have any monitors yet/i)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New monitor' }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Site' } })
+    fireEvent.change(screen.getByLabelText('URL'), {
+      target: { value: 'https://newsite.example.com' },
+    })
+    fireEvent.change(screen.getByLabelText('Expected status code'), {
+      target: { value: '404' },
+    })
+    fireEvent.change(screen.getByLabelText('Timeout (seconds)'), { target: { value: '25' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create monitor' }))
+
+    await screen.findByText('New Site')
+    expect(submittedBody?.expected_status).toBe(404)
+    expect(submittedBody?.timeout_seconds).toBe(25)
+  })
+
   it('creates a monitor and returns to the list, which now includes it', async () => {
     let created = false
     server.use(

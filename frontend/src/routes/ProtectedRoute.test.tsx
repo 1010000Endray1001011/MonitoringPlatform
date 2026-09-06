@@ -53,4 +53,15 @@ describe('ProtectedRoute', () => {
 
     await waitFor(() => expect(screen.getByText('Login placeholder')).toBeInTheDocument())
   })
+
+  it('ends up at /login rather than hanging when the backend is unreachable', async () => {
+    // HttpResponse.error() simulates the fetch() promise itself rejecting
+    // (network down, CORS failure) rather than resolving with a bad status
+    // — the failure mode useAuthBootstrap's refreshAccessToken().catch()
+    // exists for.
+    server.use(http.post(`${BASE}/api/v1/auth/token/refresh`, () => HttpResponse.error()))
+    renderProtectedRoute()
+
+    await waitFor(() => expect(screen.getByText('Login placeholder')).toBeInTheDocument())
+  })
 })

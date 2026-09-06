@@ -12,6 +12,7 @@ import type { MonitorStats, StatsPeriod } from '../api/types'
 import { CheckHistoryList } from '../components/CheckHistoryList'
 import { MonitorEditForm } from '../components/MonitorEditForm'
 import { NavBar } from '../components/NavBar'
+import { OpenIncidentFlag } from '../components/OpenIncidentFlag'
 import { StatusBadge } from '../components/StatusBadge'
 import { StatsChart } from '../components/StatsChart'
 
@@ -105,7 +106,7 @@ export function MonitorDetailPage() {
 
         <section>
           <StatusBadge status={m.status} />
-          {m.open_incident_id && <span role="alert">⚠ Open incident</span>}
+          {m.open_incident_id && <OpenIncidentFlag />}
           <p>{m.url}</p>
           <p>
             {m.method} · expects {m.expected_status} · every {m.interval_seconds}s · timeout{' '}

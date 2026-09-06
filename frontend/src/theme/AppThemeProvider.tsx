@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 import { StyleSheetManager, ThemeProvider } from 'styled-components'
 import isPropValid from '@emotion/is-prop-valid'
-import original from 'react95/dist/themes/original'
 import { GlobalStyles } from './GlobalStyles'
+import { monitoringTheme } from './monitoringTheme'
 
 // React95's own components (Button, TextInput, ...) pass their custom
 // styling props (active, primary, square, shadow, fullWidth, variant, ...)
@@ -14,7 +14,7 @@ import { GlobalStyles } from './GlobalStyles'
 export function AppThemeProvider({ children }: { children: ReactNode }) {
   return (
     <StyleSheetManager shouldForwardProp={isPropValid}>
-      <ThemeProvider theme={original}>
+      <ThemeProvider theme={monitoringTheme}>
         <GlobalStyles />
         {children}
       </ThemeProvider>
