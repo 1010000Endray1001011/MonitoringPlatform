@@ -30,3 +30,14 @@ export type MonitorStats = components['schemas']['MonitorStats']
 export type PeriodSummary = components['schemas']['PeriodSummary']
 export type StatsSeriesBucket = components['schemas']['StatsSeriesBucket']
 export type StatsPeriod = '24h' | '7d' | '30d'
+
+export type Incident = components['schemas']['IncidentDetail']
+export type IncidentListItem = components['schemas']['IncidentList']
+export type PaginatedIncidentList = components['schemas']['PaginatedIncidentListList']
+export type IncidentStatus = components['schemas']['IncidentStatusEnum']
+
+export type NotificationChannel = components['schemas']['NotificationChannel']
+export type NotificationChannelType = components['schemas']['TypeEnum']
+export type NotificationChannelWriteRequest = components['schemas']['NotificationChannelRequest']
+export type PaginatedNotificationChannelList =
+  components['schemas']['PaginatedNotificationChannelList']

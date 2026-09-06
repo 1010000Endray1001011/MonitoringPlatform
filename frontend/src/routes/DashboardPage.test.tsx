@@ -47,6 +47,14 @@ function renderDashboard() {
 
 beforeEach(() => {
   useAuthStore.getState().setAccessToken('test-token')
+  // CreateMonitorForm's channel multiselect fetches this unconditionally
+  // once the form mounts — an empty default here keeps every test that
+  // doesn't care about channels from having to know that.
+  server.use(
+    http.get(`${BASE}/api/v1/notification-channels/`, () =>
+      HttpResponse.json({ count: 0, next: null, previous: null, results: [] }),
+    ),
+  )
 })
 
 describe('DashboardPage', () => {
@@ -156,6 +164,62 @@ describe('DashboardPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create monitor' }))
 
     expect(await screen.findByText('Hostname is not allowed.')).toBeInTheDocument()
+  })
+
+  it('offers exactly the channels the API returns, and submits the selected one', async () => {
+    // The backend already scopes /notification-channels/ to the current
+    // user (IsOwner + channels_for_user) — this test isn't re-proving
+    // that, it's proving the frontend doesn't do any of its own filtering
+    // on top and just offers/sends whatever the API handed it.
+    let submittedChannelIds: string[] | undefined
+    let created = false
+    server.use(
+      http.get(`${BASE}/api/v1/monitors/`, () =>
+        HttpResponse.json(paginated(created ? [makeMonitor({ name: 'New Site' })] : [])),
+      ),
+      http.get(`${BASE}/api/v1/notification-channels/`, () =>
+        HttpResponse.json({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [
+            {
+              id: 'cccccccc-0000-0000-0000-000000000001',
+              type: 'EMAIL',
+              name: 'Personal email',
+              config: { email: 'dev@example.com' },
+              is_verified: true,
+              is_active: true,
+              last_error: null,
+              last_error_at: null,
+              created_at: '2026-09-01T00:00:00Z',
+              updated_at: '2026-09-01T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.post(`${BASE}/api/v1/monitors/`, async ({ request }) => {
+        const body = (await request.json()) as { notification_channel_ids?: string[] }
+        submittedChannelIds = body.notification_channel_ids
+        created = true
+        return HttpResponse.json(makeMonitor({ name: 'New Site' }), { status: 201 })
+      }),
+    )
+    renderDashboard()
+    await screen.findByText(/don't have any monitors yet/i)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New monitor' }))
+    expect(await screen.findByLabelText('Personal email (EMAIL)')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Site' } })
+    fireEvent.change(screen.getByLabelText('URL'), {
+      target: { value: 'https://newsite.example.com' },
+    })
+    fireEvent.click(screen.getByLabelText('Personal email (EMAIL)'))
+    fireEvent.click(screen.getByRole('button', { name: 'Create monitor' }))
+
+    await screen.findByText('New Site')
+    expect(submittedChannelIds).toEqual(['cccccccc-0000-0000-0000-000000000001'])
   })
 
   it('optimistically shows PAUSED as soon as pause is clicked', async () => {

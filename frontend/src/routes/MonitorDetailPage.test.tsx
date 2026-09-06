@@ -106,6 +106,14 @@ function renderDetailPage() {
 
 beforeEach(() => {
   useAuthStore.getState().setAccessToken('test-token')
+  // MonitorEditForm's channel multiselect fetches this unconditionally
+  // once the edit form mounts — an empty default here keeps every test
+  // that doesn't care about channels from having to know that.
+  server.use(
+    http.get(`${BASE}/api/v1/notification-channels/`, () =>
+      HttpResponse.json({ count: 0, next: null, previous: null, results: [] }),
+    ),
+  )
 })
 
 describe('MonitorDetailPage', () => {

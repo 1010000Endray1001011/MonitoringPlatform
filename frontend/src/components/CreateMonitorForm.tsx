@@ -11,7 +11,9 @@ import {
 import { ApiError } from '../api/client'
 import { describeNonFieldError, extractFieldErrors } from '../api/errors'
 import { useCreateMonitor } from '../api/monitors'
+import { useNotificationChannels } from '../api/notificationChannels'
 import type { MonitorInterval, MonitorMethod } from '../api/types'
+import { ChannelMultiSelect } from './ChannelMultiSelect'
 import { INTERVAL_OPTIONS, METHOD_OPTIONS } from './monitorFormOptions'
 
 function describeGeneralError(error: unknown): string | null {
@@ -33,8 +35,10 @@ export function CreateMonitorForm({ onCreated, onCancel }: CreateMonitorFormProp
   const [expectedStatus, setExpectedStatus] = useState(200)
   const [intervalSeconds, setIntervalSeconds] = useState<MonitorInterval>(300)
   const [timeoutSeconds, setTimeoutSeconds] = useState(10)
+  const [channelIds, setChannelIds] = useState<string[]>([])
 
   const createMonitor = useCreateMonitor()
+  const channels = useNotificationChannels()
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -46,6 +50,7 @@ export function CreateMonitorForm({ onCreated, onCancel }: CreateMonitorFormProp
         expected_status: expectedStatus,
         interval_seconds: intervalSeconds,
         timeout_seconds: timeoutSeconds,
+        notification_channel_ids: channelIds,
       },
       { onSuccess: onCreated },
     )
@@ -114,6 +119,12 @@ export function CreateMonitorForm({ onCreated, onCancel }: CreateMonitorFormProp
             <NumberInput min={1} max={30} value={timeoutSeconds} onChange={setTimeoutSeconds} />
           </label>
           {fieldErrors.timeout_seconds && <p role="alert">{fieldErrors.timeout_seconds}</p>}
+
+          <ChannelMultiSelect
+            channels={channels.data?.results ?? []}
+            selectedIds={channelIds}
+            onChange={setChannelIds}
+          />
 
           {generalError && <p role="alert">{generalError}</p>}
 

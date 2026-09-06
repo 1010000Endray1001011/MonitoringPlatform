@@ -11,6 +11,7 @@ import {
 import type { MonitorStats, StatsPeriod } from '../api/types'
 import { CheckHistoryList } from '../components/CheckHistoryList'
 import { MonitorEditForm } from '../components/MonitorEditForm'
+import { NavBar } from '../components/NavBar'
 import { StatusBadge } from '../components/StatusBadge'
 import { StatsChart } from '../components/StatsChart'
 
@@ -100,7 +101,7 @@ export function MonitorDetailPage() {
     <Window>
       <WindowHeader>{m.name}</WindowHeader>
       <WindowContent>
-        <Button onClick={() => navigate('/dashboard')}>Back to dashboard</Button>
+        <NavBar />
 
         <section>
           <StatusBadge status={m.status} />

@@ -10,7 +10,9 @@ import {
 } from 'react95'
 import { describeNonFieldError, extractFieldErrors } from '../api/errors'
 import { useUpdateMonitor } from '../api/monitorDetail'
+import { useNotificationChannels } from '../api/notificationChannels'
 import type { MonitorDetail, MonitorInterval, MonitorMethod } from '../api/types'
+import { ChannelMultiSelect } from './ChannelMultiSelect'
 import { INTERVAL_OPTIONS, METHOD_OPTIONS } from './monitorFormOptions'
 
 interface MonitorEditFormProps {
@@ -30,8 +32,12 @@ export function MonitorEditForm({ monitor, onSaved, onCancel }: MonitorEditFormP
   const [expectedStatus, setExpectedStatus] = useState(monitor.expected_status)
   const [intervalSeconds, setIntervalSeconds] = useState<MonitorInterval>(monitor.interval_seconds)
   const [timeoutSeconds, setTimeoutSeconds] = useState(monitor.timeout_seconds)
+  const [channelIds, setChannelIds] = useState<string[]>(
+    monitor.notification_channels.map((channel) => channel.id),
+  )
 
   const updateMonitor = useUpdateMonitor(monitor.id)
+  const channels = useNotificationChannels()
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -43,6 +49,7 @@ export function MonitorEditForm({ monitor, onSaved, onCancel }: MonitorEditFormP
         expected_status: expectedStatus,
         interval_seconds: intervalSeconds,
         timeout_seconds: timeoutSeconds,
+        notification_channel_ids: channelIds,
       },
       { onSuccess: onSaved },
     )
@@ -110,6 +117,12 @@ export function MonitorEditForm({ monitor, onSaved, onCancel }: MonitorEditFormP
             <NumberInput min={1} max={30} value={timeoutSeconds} onChange={setTimeoutSeconds} />
           </label>
           {fieldErrors.timeout_seconds && <p role="alert">{fieldErrors.timeout_seconds}</p>}
+
+          <ChannelMultiSelect
+            channels={channels.data?.results ?? []}
+            selectedIds={channelIds}
+            onChange={setChannelIds}
+          />
 
           {generalError && <p role="alert">{generalError}</p>}
 

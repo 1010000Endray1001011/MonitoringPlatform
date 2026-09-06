@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, TextInput, Window, WindowContent, WindowHeader } from 'react95'
-import { logout } from '../auth/logout'
 import { useMonitors, usePauseMonitor, useResumeMonitor } from '../api/monitors'
 import type { MonitorList } from '../api/types'
 import { CreateMonitorForm } from '../components/CreateMonitorForm'
 import { MonitorCard } from '../components/MonitorCard'
+import { NavBar } from '../components/NavBar'
 
 // Fires the search request 300ms after the user stops typing rather than
 // on every keystroke — the backend's search filter is cheap, but there's
@@ -29,11 +29,6 @@ export function DashboardPage() {
   const pauseMonitor = usePauseMonitor()
   const resumeMonitor = useResumeMonitor()
 
-  async function handleLogout() {
-    await logout()
-    navigate('/login', { replace: true })
-  }
-
   function handleTogglePause(monitor: MonitorList) {
     if (monitor.is_enabled) {
       pauseMonitor.mutate(monitor.id)
@@ -53,7 +48,7 @@ export function DashboardPage() {
     <Window>
       <WindowHeader>Dashboard</WindowHeader>
       <WindowContent>
-        <Button onClick={handleLogout}>Log out</Button>
+        <NavBar />
 
         {showCreateForm ? (
           <CreateMonitorForm
