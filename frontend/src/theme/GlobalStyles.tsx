@@ -10,10 +10,23 @@ import ms_sans_serif_bold from 'react95/dist/fonts/ms_sans_serif_bold.woff2'
 // The body background is the "desktop" a Win95 window normally floats on
 // (real Windows used a flat teal here — `theme.desktopBackground` still
 // exists as that same token, just repurposed toward the cyberpunk violet
-// this pass introduces). The two repeating-linear-gradients on top of it
-// are a faint cyan grid — cheap to do in CSS, and it reads as "cyberpunk
-// desktop" without building an actual desktop-icons/taskbar metaphor,
-// which ADR-025 / the ROADMAP's cut-list explicitly leave optional.
+// this pass introduces). Three layers sit on top of it, and the order
+// matters: CSS paints the first-listed background-image nearest the
+// viewer, so the two grid gradients are listed first and the glow last,
+// leaving the grid lines visible *over* the lit area rather than being
+// washed out by it.
+//
+// The grid is deliberately fine and faint. An earlier, coarser version
+// (40px cells at ~6% opacity) read as unfinished placeholder checkering
+// rather than as texture; halving the cell size and dropping the opacity
+// turns it back into something the eye registers as surface rather than
+// as content. The radial glow underneath is what actually fixes the
+// emptiness: it puts a pool of light where the centered content sits, so
+// a screen holding a single dialog looks composed instead of abandoned.
+//
+// background-attachment: fixed anchors all three layers to the viewport
+// rather than the document, so the glow stays centered behind the content
+// on a long scrolling page (the dashboard) instead of sliding off the top.
 export const GlobalStyles = createGlobalStyle`
   ${styleReset}
 
@@ -37,17 +50,24 @@ export const GlobalStyles = createGlobalStyle`
     background-image:
       repeating-linear-gradient(
         0deg,
-        rgba(0, 255, 242, 0.06) 0px,
-        rgba(0, 255, 242, 0.06) 1px,
+        rgba(0, 255, 242, 0.035) 0px,
+        rgba(0, 255, 242, 0.035) 1px,
         transparent 1px,
-        transparent 40px
+        transparent 22px
       ),
       repeating-linear-gradient(
         90deg,
-        rgba(0, 255, 242, 0.06) 0px,
-        rgba(0, 255, 242, 0.06) 1px,
+        rgba(0, 255, 242, 0.035) 0px,
+        rgba(0, 255, 242, 0.035) 1px,
         transparent 1px,
-        transparent 40px
+        transparent 22px
+      ),
+      radial-gradient(
+        ellipse 85% 65% at 50% 42%,
+        rgba(103, 58, 183, 0.5) 0%,
+        rgba(26, 8, 100, 0.28) 45%,
+        rgba(13, 2, 33, 0) 78%
       );
+    background-attachment: fixed;
   }
 `

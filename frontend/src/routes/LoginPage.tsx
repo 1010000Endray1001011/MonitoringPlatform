@@ -1,10 +1,11 @@
 import { type FormEvent, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
-import { Button, TextInput, Window, WindowContent, WindowHeader } from 'react95'
+import { Button, TextInput } from 'react95'
 import { apiClient, ApiError } from '../api/client'
 import type { AccessToken } from '../api/types'
 import { useAuthStore } from '../auth/store'
+import { AuthForm, AuthMessage, AuthWindow } from '../components/AuthWindow'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -30,36 +31,41 @@ export function LoginPage() {
   }
 
   return (
-    <Window>
-      <WindowHeader>Log in</WindowHeader>
-      <WindowContent>
-        {justRegistered && <p>Account created — log in below.</p>}
-        <form onSubmit={handleSubmit}>
-          <TextInput
-            name="email"
-            type="email"
-            placeholder="Email"
-            fullWidth
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-          <TextInput
-            name="password"
-            type="password"
-            placeholder="Password"
-            fullWidth
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-          {login.isError && <p role="alert">{describeLoginError(login.error)}</p>}
-          <Button type="submit" disabled={login.isPending}>
-            {login.isPending ? 'Logging in…' : 'Log in'}
-          </Button>
-        </form>
-      </WindowContent>
-    </Window>
+    <AuthWindow active="login">
+      {/* Both messages sit inside the form rather than above it purely so
+          the form's own gap spaces them — a sibling of the form would
+          need spacing rules of its own to avoid butting against the first
+          input. */}
+      <AuthForm onSubmit={handleSubmit}>
+        {justRegistered && <AuthMessage $tone="info">Account created — log in below.</AuthMessage>}
+        <TextInput
+          name="email"
+          type="email"
+          placeholder="Email"
+          fullWidth
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          required
+        />
+        <TextInput
+          name="password"
+          type="password"
+          placeholder="Password"
+          fullWidth
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          required
+        />
+        {login.isError && (
+          <AuthMessage $tone="error" role="alert">
+            {describeLoginError(login.error)}
+          </AuthMessage>
+        )}
+        <Button type="submit" fullWidth disabled={login.isPending}>
+          {login.isPending ? 'Logging in…' : 'Log in'}
+        </Button>
+      </AuthForm>
+    </AuthWindow>
   )
 }
 

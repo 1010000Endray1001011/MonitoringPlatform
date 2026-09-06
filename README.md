@@ -1,13 +1,14 @@
 # Uptime Monitoring Platform
 
-A backend service that periodically checks HTTP/HTTPS endpoints, tracks their
-health over time, opens and resolves incidents automatically, and notifies
-you (email or Telegram) when something goes down and again when it recovers.
+A service that periodically checks HTTP/HTTPS endpoints, tracks their health
+over time, opens and resolves incidents automatically, and notifies you
+(email or Telegram) when something goes down and again when it recovers.
 Think a small, self-hosted UptimeRobot.
 
-Built with Django + Django REST Framework, PostgreSQL, Redis, and Celery.
-Fully documented via OpenAPI/Swagger — the running API is its own reference,
-so this file only covers getting it running and trying it out.
+Backend: Django + Django REST Framework, PostgreSQL, Redis, and Celery, fully
+documented via OpenAPI/Swagger — the running API is its own reference.
+Frontend: a React 19 + TypeScript SPA with a Windows-95-plus-cyberpunk look
+(see below). This file only covers getting both running and trying them out.
 
 ## What it does
 
@@ -37,8 +38,10 @@ docker compose up --build
 
 `web` runs migrations on startup and serves on `http://localhost:8000`.
 `celery-worker` and `celery-beat` start alongside it and immediately begin
-running the scheduled checks, hourly rollups, and retention jobs.
+running the scheduled checks, hourly rollups, and retention jobs. `frontend`
+builds and serves the React UI on `http://localhost:5173`.
 
+- UI: `http://localhost:5173`
 - Swagger UI: `http://localhost:8000/api/docs/`
 - Health check: `http://localhost:8000/health`
 
@@ -60,6 +63,17 @@ poetry run celery -A config worker -l info -Q checks,notifications,maintenance
 poetry run celery -A config beat -l info
 ```
 
+Frontend dev server, against the backend above:
+
+```bash
+cd frontend
+npm install
+cp .env.example .env  # VITE_API_BASE_URL defaults to http://localhost:8000
+npm run dev
+```
+
+Serves on `http://localhost:5173` with hot reload.
+
 ## See it work in two minutes
 
 ```bash
@@ -72,6 +86,15 @@ status (stays healthy), one with a status it can never actually return
 (guaranteed to fail). Log in via `/api/v1/auth/token`, watch
 `GET /api/v1/incidents/` — within a couple of scheduler ticks the failing
 monitor opens an incident on its own with no further action needed.
+
+Same demo account through the UI instead: open `http://localhost:5173`, log
+in with the credentials above, and the failing monitor's incident shows up
+on the dashboard (a red "⚠ Open incident" flag with a neon glow) and on
+`/incidents` — no curl needed.
+
+<!-- TODO: dashboard screenshot — couldn't capture one in this sandbox
+     (the Browser pane tool won't composite frames here); drop a real one
+     at docs/screenshots/dashboard.png and reference it above. -->
 
 ## Try it by hand: register → monitor → incident → notification
 
@@ -179,6 +202,12 @@ notable ones:
 | `TELEGRAM_BOT_TOKEN` | One bot for the whole platform; each channel only stores which `chat_id` to message. |
 | `EMAIL_BACKEND` | Defaults to the console backend — notifications print to the server log instead of sending real email. |
 
+See [`frontend/.env.example`](frontend/.env.example) for the frontend's own
+(much shorter) list — just `VITE_API_BASE_URL`, baked into the static bundle
+at build time (Vite inlines `import.meta.env.*` at build, not at container
+start), which is why Docker Compose passes it as a build arg rather than a
+runtime environment variable.
+
 Never commit a real `.env` — it's gitignored.
 
 ## Project layout
@@ -199,4 +228,12 @@ integrations/     Django-independent clients: HTTP probe (+ SSRF re-check),
                   comes back as a typed result object
 tests/            unit / services / api / tasks / integration
 docker/           Dockerfile, entrypoint.sh
+frontend/         React 19 + TypeScript SPA (Vite, TanStack Query, React95)
+    src/api/      typed fetch client + TanStack Query hooks; types generated
+                  from the backend's own OpenAPI schema, not hand-written
+    src/auth/     access token (in-memory only) + silent-refresh bootstrap
+    src/routes/   one file per screen (dashboard, monitor detail, incidents,
+                  channels, login/register, 404)
+    src/components/  shared UI pieces (status badges, forms, nav)
+    src/theme/    the retro Windows-95 + cyberpunk-accent theme
 ```

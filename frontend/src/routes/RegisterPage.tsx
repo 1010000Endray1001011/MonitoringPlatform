@@ -1,9 +1,10 @@
 import { type FormEvent, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
-import { Button, TextInput, Window, WindowContent, WindowHeader } from 'react95'
+import { Button, TextInput } from 'react95'
 import { apiClient, ApiError } from '../api/client'
 import type { RegisterResponse } from '../api/types'
+import { AuthForm, AuthMessage, AuthWindow } from '../components/AuthWindow'
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -31,44 +32,45 @@ export function RegisterPage() {
   }
 
   return (
-    <Window>
-      <WindowHeader>Register</WindowHeader>
-      <WindowContent>
-        <form onSubmit={handleSubmit}>
-          <TextInput
-            name="email"
-            type="email"
-            placeholder="Email"
-            fullWidth
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-          <TextInput
-            name="password"
-            type="password"
-            placeholder="Password"
-            fullWidth
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-          <TextInput
-            name="password_confirm"
-            type="password"
-            placeholder="Confirm password"
-            fullWidth
-            value={passwordConfirm}
-            onChange={(event) => setPasswordConfirm(event.target.value)}
-            required
-          />
-          {register.isError && <p role="alert">{describeRegisterError(register.error)}</p>}
-          <Button type="submit" disabled={register.isPending}>
-            {register.isPending ? 'Creating account…' : 'Register'}
-          </Button>
-        </form>
-      </WindowContent>
-    </Window>
+    <AuthWindow active="register">
+      <AuthForm onSubmit={handleSubmit}>
+        <TextInput
+          name="email"
+          type="email"
+          placeholder="Email"
+          fullWidth
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          required
+        />
+        <TextInput
+          name="password"
+          type="password"
+          placeholder="Password"
+          fullWidth
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          required
+        />
+        <TextInput
+          name="password_confirm"
+          type="password"
+          placeholder="Confirm password"
+          fullWidth
+          value={passwordConfirm}
+          onChange={(event) => setPasswordConfirm(event.target.value)}
+          required
+        />
+        {register.isError && (
+          <AuthMessage $tone="error" role="alert">
+            {describeRegisterError(register.error)}
+          </AuthMessage>
+        )}
+        <Button type="submit" fullWidth disabled={register.isPending}>
+          {register.isPending ? 'Creating account…' : 'Register'}
+        </Button>
+      </AuthForm>
+    </AuthWindow>
   )
 }
 

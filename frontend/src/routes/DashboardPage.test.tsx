@@ -106,7 +106,10 @@ describe('DashboardPage', () => {
         HttpResponse.json(paginated(created ? [makeMonitor({ name: 'New Site' })] : [])),
       ),
       http.post(`${BASE}/api/v1/monitors/`, async ({ request }) => {
-        submittedBody = await request.json()
+        submittedBody = (await request.json()) as {
+          expected_status?: number
+          timeout_seconds?: number
+        }
         created = true
         return HttpResponse.json(makeMonitor({ name: 'New Site' }), { status: 201 })
       }),
