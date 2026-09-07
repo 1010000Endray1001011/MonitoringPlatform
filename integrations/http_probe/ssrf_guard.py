@@ -6,7 +6,7 @@ created or edited — it has no way to know what a hostname will resolve to
 by the time a check actually runs, possibly months later. This module
 re-resolves the hostname and re-checks every address it comes back with,
 right before the outbound request, using the exact same denylist
-(`apps.common.validators.is_denied_ipv4`) so the two checks can never drift
+(`apps.common.validators.is_denied_ip`) so the two checks can never drift
 into different policies.
 
 This still isn't airtight: `requests` resolves the hostname a second time,
@@ -25,7 +25,7 @@ import socket
 
 from django.conf import settings
 
-from apps.common.validators import is_denied_ipv4
+from apps.common.validators import is_denied_ip
 
 from .types import BLOCKED_TARGET
 
@@ -43,13 +43,21 @@ def check_target_is_allowed(hostname: str, port: int) -> str | None:
         # the same way and will be classified as a DNS error when it does.
         return None
 
-    for family, _, _, _, sockaddr in resolved:
-        if family == socket.AF_INET6:
-            # IPv6 is unconditionally unsupported everywhere in the system,
-            # not just at write time — nothing to compare against a
-            # denylist for an address type we never let through.
-            return BLOCKED_TARGET
-        if is_denied_ipv4(ipaddress.ip_address(sockaddr[0])):
+    # Every address, not just the first: the OS resolver decides which one
+    # `requests` actually connects to, and that choice is not visible from
+    # here. A hostname is therefore only safe if *all* of its addresses are
+    # safe — one denied entry anywhere in the list is enough to refuse.
+    #
+    # Both families go through the same is_denied_ip. An earlier version
+    # short-circuited on AF_INET6 and refused the host outright, which
+    # blocked every target that merely publishes an AAAA record alongside
+    # its A record — i.e. most of the public internet, and the reason
+    # monitoring google.com came back BLOCKED_TARGET without a single
+    # packet being sent.
+    for _, _, _, _, sockaddr in resolved:
+        # sockaddr[0] can carry a zone id for link-local IPv6
+        # ("fe80::1%eth0"); ip_address parses that form directly.
+        if is_denied_ip(ipaddress.ip_address(sockaddr[0])):
             return BLOCKED_TARGET
 
     return None

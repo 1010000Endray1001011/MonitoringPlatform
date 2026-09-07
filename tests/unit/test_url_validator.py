@@ -26,8 +26,10 @@ BLOCKED_URLS = [
     pytest.param("http://169.254.169.254/", id="link-local-cloud-metadata"),
     pytest.param("http://100.64.0.1/", id="cgnat"),
     pytest.param("http://0.0.0.0/", id="unspecified"),
-    pytest.param("http://[::1]/", id="ipv6-loopback-blanket-ban"),
-    pytest.param("http://[fc00::1]/", id="ipv6-ula-blanket-ban"),
+    pytest.param("http://[::1]/", id="ipv6-loopback"),
+    pytest.param("http://[fc00::1]/", id="ipv6-ula"),
+    pytest.param("http://[fe80::1]/", id="ipv6-link-local"),
+    pytest.param("http://[::ffff:127.0.0.1]/", id="ipv6-mapped-loopback"),
     pytest.param("http://example.com:9999/", id="port-not-whitelisted"),
     pytest.param("http://user:pass@example.com/", id="userinfo-in-url"),
     pytest.param("ftp://example.com/", id="scheme-ftp"),
@@ -41,6 +43,7 @@ ALLOWED_URLS = [
     pytest.param("https://example.com/health", id="plain-https-path"),
     pytest.param("https://api.example.com:8443/status", id="whitelisted-port"),
     pytest.param("http://93.184.216.34/", id="public-ip-literal"),
+    pytest.param("http://[2606:2800:220:1::1]/", id="public-ipv6-literal"),
 ]
 
 
@@ -64,10 +67,10 @@ def test_allow_private_targets_flag_lets_loopback_through(settings):
     validate_monitor_url("http://127.0.0.1/")  # must not raise
 
 
-def test_allow_private_targets_flag_does_not_lift_the_ipv6_ban(settings):
-    # IPv6 is unconditionally out of scope for the MVP
-    # that's a "not built yet" limitation, not part of the
-    # private/public IPv4 policy the flag toggles.
+def test_allow_private_targets_flag_lifts_the_ipv6_ban_too(settings):
+    # IPv6 literals are now judged by the same private/reserved policy as
+    # IPv4 ones instead of being refused outright for being IPv6, so the
+    # escape hatch has to cover both families or local development over
+    # ::1 would be the one thing it couldn't unblock.
     settings.MONITORING_ALLOW_PRIVATE_TARGETS = True
-    with pytest.raises(ValidationError):
-        validate_monitor_url("http://[::1]/")
+    validate_monitor_url("http://[::1]/")  # must not raise

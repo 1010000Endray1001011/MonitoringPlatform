@@ -767,6 +767,11 @@ export interface components {
         /**
          * @description Just enough of a Monitor to identify it from inside an incident —
          *     the full monitor is one request away via its own id.
+         *
+         *     `method` is here because a monitor's name is not unique: the same URL
+         *     checked by GET and by POST is two monitors that can legitimately share
+         *     a name, and without the method an incident feed lists both under a
+         *     label that can't tell them apart.
          */
         _MonitorSummary: {
             /** Format: uuid */
@@ -774,6 +779,7 @@ export interface components {
             readonly name: string;
             /** Format: uri */
             readonly url: string;
+            readonly method: components["schemas"]["MethodEnum"];
         };
         /**
          * @description Just enough of a channel to identify it from inside a monitor — the

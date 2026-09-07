@@ -61,6 +61,29 @@ DENIED_IPV4_NETWORKS = [
 ]
 
 
+# The IPv6 half of the same policy. This exists because the probe cannot
+# choose which address family it connects over: `requests` hands the
+# hostname to the OS resolver, which on a dual-stack host may well pick an
+# AAAA record. Without this table the guard had only two options for a
+# resolved IPv6 address — trust it blindly, or refuse it — and refusing it
+# meant refusing every host with an AAAA record, which today is most of
+# the internet (google.com, youtube.com, example.com all have one).
+DENIED_IPV6_NETWORKS = [
+    ipaddress.ip_network("::/128"),  # unspecified
+    ipaddress.ip_network("::1/128"),  # loopback
+    ipaddress.ip_network("100::/64"),  # discard-only (RFC6666)
+    ipaddress.ip_network("2001:db8::/32"),  # documentation
+    ipaddress.ip_network("fc00::/7"),  # unique local, the IPv6 RFC1918 (RFC4193)
+    ipaddress.ip_network("fe80::/10"),  # link-local
+    ipaddress.ip_network("ff00::/8"),  # multicast
+]
+
+# The well-known NAT64 prefix carries an IPv4 address in its low 32 bits.
+# Python's ipaddress knows how to unwrap the other IPv4-in-IPv6 schemes
+# (mapped, 6to4, Teredo) but not this one, so it's spelled out here.
+NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+
+
 def is_denied_ipv4(address: ipaddress.IPv4Address) -> bool:
     """True if `address` falls in a network monitors may never target.
 
@@ -70,6 +93,48 @@ def is_denied_ipv4(address: ipaddress.IPv4Address) -> bool:
     write-time validator is just the friendly early warning.
     """
     return any(address in network for network in DENIED_IPV4_NETWORKS)
+
+
+def _embedded_ipv4_addresses(address: ipaddress.IPv6Address) -> list[ipaddress.IPv4Address]:
+    """Every IPv4 address tunnelled inside an IPv6 one.
+
+    Several IPv6 formats wrap an IPv4 address: ::ffff:a.b.c.d (mapped),
+    2002::/16 (6to4), 2001::/32 (Teredo) and 64:ff9b::/96 (NAT64). Traffic
+    to any of them ultimately reaches the embedded IPv4 host, so
+    ::ffff:127.0.0.1 is loopback by another spelling. Checking only the
+    IPv6 ranges above would let exactly that walk straight through the
+    guard, which is why these get unwrapped and re-tested against the IPv4
+    table rather than being treated as ordinary IPv6 addresses.
+    """
+    embedded = []
+    if address.ipv4_mapped is not None:
+        embedded.append(address.ipv4_mapped)
+    if address.sixtofour is not None:
+        embedded.append(address.sixtofour)
+    if address.teredo is not None:
+        # (server, client) — the client half is the one an attacker picks,
+        # but neither is worth trusting, so both are checked.
+        embedded.extend(address.teredo)
+    if address in NAT64_PREFIX:
+        embedded.append(ipaddress.IPv4Address(int(address) & 0xFFFFFFFF))
+    return embedded
+
+
+def is_denied_ipv6(address: ipaddress.IPv6Address) -> bool:
+    """True if `address` is in a denied IPv6 range, or tunnels an IPv4
+    address that is itself denied."""
+    if any(address in network for network in DENIED_IPV6_NETWORKS):
+        return True
+    return any(is_denied_ipv4(embedded) for embedded in _embedded_ipv4_addresses(address))
+
+
+def is_denied_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Family-agnostic entry point — the probe resolves a hostname and gets
+    back a mix of families, and every one of them has to be judged by the
+    table that applies to it."""
+    if isinstance(address, ipaddress.IPv6Address):
+        return is_denied_ipv6(address)
+    return is_denied_ipv4(address)
 
 
 def validate_monitor_url(url: str) -> None:
@@ -113,14 +178,10 @@ def validate_monitor_url(url: str) -> None:
     except ValueError:
         return  # a domain name — nothing more to check at write time
 
-    if isinstance(address, ipaddress.IPv6Address):
-        # IPv6 support (and the private-range table it would need) is out
-        # of scope for now. Rejecting every IPv6 literal outright is
-        # simpler and strictly safer than a half-implemented range check,
-        # and — unlike the IPv4 policy — it isn't gated by
-        # MONITORING_ALLOW_PRIVATE_TARGETS, since it's a "not built yet"
-        # limitation rather than a policy choice.
-        raise ValidationError("IPv6 literal addresses are not supported.")
-
-    if not allow_private and is_denied_ipv4(address):
+    # One branch for both families: is_denied_ip picks the right table. An
+    # IPv6 literal is judged by the same private/reserved policy as an
+    # IPv4 one and is gated by the same flag, rather than being rejected
+    # outright the way it was while IPv6 had no range table to check
+    # against.
+    if not allow_private and is_denied_ip(address):
         raise ValidationError(f"IP address {address} is in a private or reserved range.")

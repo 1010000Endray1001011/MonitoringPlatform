@@ -36,6 +36,10 @@ export function IncidentRow({ incident }: IncidentRowProps) {
           {incident.monitor.name}
         </Button>
       </TableDataCell>
+      {/* A separate cell rather than part of the button's label: the
+          button should keep reading as just the monitor's name, while the
+          method is what tells two same-named monitors apart at a glance. */}
+      <TableDataCell>{incident.monitor.method}</TableDataCell>
       <TableDataCell>
         <IncidentStatusBadge status={incident.status} />
       </TableDataCell>

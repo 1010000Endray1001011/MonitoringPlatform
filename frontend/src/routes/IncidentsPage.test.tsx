@@ -17,6 +17,7 @@ function makeIncident(overrides: Partial<IncidentListItem> = {}): IncidentListIt
       id: 'bbbbbbbb-0000-0000-0000-000000000001',
       name: 'Prod API',
       url: 'https://example.com/',
+      method: 'GET',
     },
     status: 'OPEN',
     started_at: '2026-09-01T10:00:00Z',
@@ -30,16 +31,28 @@ function makeIncident(overrides: Partial<IncidentListItem> = {}): IncidentListIt
   }
 }
 
-function mockIncidents(results: IncidentListItem[]) {
+function mockIncidents(results: IncidentListItem[], monitors: unknown[] = []) {
   server.use(
     http.get(`${BASE}/api/v1/incidents/`, () =>
       HttpResponse.json({ count: results.length, next: null, previous: null, results }),
     ),
     // The monitor filter dropdown fetches this unconditionally on mount.
     http.get(`${BASE}/api/v1/monitors/`, () =>
-      HttpResponse.json({ count: 0, next: null, previous: null, results: [] }),
+      HttpResponse.json({ count: monitors.length, next: null, previous: null, results: monitors }),
     ),
   )
+}
+
+// Only the handful of fields the filter's option list actually reads —
+// the endpoint returns a lot more, none of which this page touches.
+function makeFilterMonitor(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'cccccccc-0000-0000-0000-000000000001',
+    name: 'test',
+    url: 'https://a.example.com/',
+    method: 'GET',
+    ...overrides,
+  }
 }
 
 beforeEach(() => {
@@ -124,5 +137,48 @@ describe('IncidentsPage', () => {
     renderWithProviders(<IncidentsPage />)
 
     expect(await screen.findByText(/no incidents match/i)).toBeInTheDocument()
+  })
+
+  it('shows the request method next to each incident', async () => {
+    mockIncidents([
+      makeIncident({ monitor: { ...makeIncident().monitor, method: 'POST' } as never }),
+    ])
+    renderWithProviders(<IncidentsPage />)
+
+    expect(await screen.findByText('POST')).toBeInTheDocument()
+  })
+
+  it('keeps filter options readable when monitor names are unique', async () => {
+    mockIncidents([], [makeFilterMonitor({ name: 'Prod API' })])
+    renderWithProviders(<IncidentsPage />)
+
+    // No method/URL suffix to wade through when the name already
+    // identifies the monitor on its own.
+    expect(await screen.findByRole('option', { name: 'Prod API' })).toBeInTheDocument()
+  })
+
+  it('disambiguates filter options when two monitors share a name', async () => {
+    mockIncidents(
+      [],
+      [
+        makeFilterMonitor({ method: 'GET', url: 'https://a.example.com/' }),
+        makeFilterMonitor({
+          id: 'cccccccc-0000-0000-0000-000000000002',
+          method: 'POST',
+          url: 'https://b.example.com/',
+        }),
+      ],
+    )
+    renderWithProviders(<IncidentsPage />)
+
+    // Both are called "test"; without the suffix the dropdown offered two
+    // identical entries and picking one was a guess.
+    expect(
+      await screen.findByRole('option', { name: 'test · GET · https://a.example.com/' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('option', { name: 'test · POST · https://b.example.com/' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'test' })).not.toBeInTheDocument()
   })
 })

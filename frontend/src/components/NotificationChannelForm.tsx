@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from 'react'
-import { Button, SelectNative, TextInput, Window, WindowContent, WindowHeader } from 'react95'
+import { Button, SelectNative, TextInput } from 'react95'
+import { Field, FieldError, FormActions, FormFields, FormPanel } from './FormPanel'
 import { describeNonFieldError, extractFieldErrors } from '../api/errors'
 import { useCreateNotificationChannel } from '../api/notificationChannels'
 import type { NotificationChannelType } from '../api/types'
@@ -40,67 +41,66 @@ export function NotificationChannelForm({ onCreated, onCancel }: NotificationCha
   const generalError = describeNonFieldError(createChannel.error)
 
   return (
-    <Window>
-      <WindowHeader>New notification channel</WindowHeader>
-      <WindowContent>
-        <form onSubmit={handleSubmit}>
-          <label>
-            Name
+    <FormPanel title="New notification channel">
+      <FormFields onSubmit={handleSubmit}>
+        <Field>
+          Name
+          <TextInput
+            name="name"
+            fullWidth
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            required
+          />
+        </Field>
+        {fieldErrors.name && <FieldError role="alert">{fieldErrors.name}</FieldError>}
+
+        <Field>
+          Type
+          <SelectNative
+            options={TYPE_OPTIONS}
+            value={type}
+            onChange={(option) => setType(option.value as NotificationChannelType)}
+          />
+        </Field>
+
+        {type === 'EMAIL' ? (
+          <Field>
+            Email address
             <TextInput
-              name="name"
+              name="email"
+              type="email"
               fullWidth
-              value={name}
-              onChange={(event) => setName(event.target.value)}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
               required
             />
-          </label>
-          {fieldErrors.name && <p role="alert">{fieldErrors.name}</p>}
-
-          <label>
-            Type
-            <SelectNative
-              options={TYPE_OPTIONS}
-              value={type}
-              onChange={(option) => setType(option.value as NotificationChannelType)}
+          </Field>
+        ) : (
+          <Field>
+            Telegram chat ID
+            <TextInput
+              name="chat_id"
+              fullWidth
+              value={chatId}
+              onChange={(event) => setChatId(event.target.value)}
+              required
             />
-          </label>
+          </Field>
+        )}
+        {fieldErrors.config && <FieldError role="alert">{fieldErrors.config}</FieldError>}
 
-          {type === 'EMAIL' ? (
-            <label>
-              Email address
-              <TextInput
-                name="email"
-                type="email"
-                fullWidth
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                required
-              />
-            </label>
-          ) : (
-            <label>
-              Telegram chat ID
-              <TextInput
-                name="chat_id"
-                fullWidth
-                value={chatId}
-                onChange={(event) => setChatId(event.target.value)}
-                required
-              />
-            </label>
-          )}
-          {fieldErrors.config && <p role="alert">{fieldErrors.config}</p>}
+        {generalError && <FieldError role="alert">{generalError}</FieldError>}
 
-          {generalError && <p role="alert">{generalError}</p>}
-
+        <FormActions>
           <Button type="submit" disabled={createChannel.isPending}>
             {createChannel.isPending ? 'Creating…' : 'Create channel'}
           </Button>
           <Button type="button" onClick={onCancel}>
             Cancel
           </Button>
-        </form>
-      </WindowContent>
-    </Window>
+        </FormActions>
+      </FormFields>
+    </FormPanel>
   )
 }

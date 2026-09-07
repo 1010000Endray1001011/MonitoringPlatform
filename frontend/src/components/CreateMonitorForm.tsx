@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from 'react'
-import { Button, SelectNative, TextInput, Window, WindowContent, WindowHeader } from 'react95'
+import { Button, SelectNative, TextInput } from 'react95'
+import { Field, FieldError, FormActions, FormFields, FormPanel } from './FormPanel'
 import { ApiError } from '../api/client'
 import { describeNonFieldError, extractFieldErrors } from '../api/errors'
 import { useCreateMonitor } from '../api/monitors'
@@ -52,48 +53,46 @@ export function CreateMonitorForm({ onCreated, onCancel }: CreateMonitorFormProp
   const generalError = describeGeneralError(createMonitor.error)
 
   return (
-    <Window>
-      <WindowHeader>New monitor</WindowHeader>
-      <WindowContent>
-        <form onSubmit={handleSubmit}>
-          <label>
-            Name
-            <TextInput
-              name="name"
-              fullWidth
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              required
-            />
-          </label>
-          {fieldErrors.name && <p role="alert">{fieldErrors.name}</p>}
+    <FormPanel title="New monitor">
+      <FormFields onSubmit={handleSubmit}>
+        <Field>
+          Name
+          <TextInput
+            name="name"
+            fullWidth
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            required
+          />
+        </Field>
+        {fieldErrors.name && <FieldError role="alert">{fieldErrors.name}</FieldError>}
 
-          <label>
-            URL
-            <TextInput
-              name="url"
-              type="url"
-              fullWidth
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-              placeholder="https://example.com/health"
-              required
-            />
-          </label>
-          {fieldErrors.url && <p role="alert">{fieldErrors.url}</p>}
+        <Field>
+          URL
+          <TextInput
+            name="url"
+            type="url"
+            fullWidth
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="https://example.com/health"
+            required
+          />
+        </Field>
+        {fieldErrors.url && <FieldError role="alert">{fieldErrors.url}</FieldError>}
 
-          <label>
-            Method
-            <SelectNative
-              options={METHOD_OPTIONS}
-              value={method}
-              onChange={(option) => setMethod(option.value as MonitorMethod)}
-            />
-          </label>
+        <Field>
+          Method
+          <SelectNative
+            options={METHOD_OPTIONS}
+            value={method}
+            onChange={(option) => setMethod(option.value as MonitorMethod)}
+          />
+        </Field>
 
-          <label>
-            Expected status code
-            {/* react95's NumberInput only ever calls onChange from its
+        <Field $compact>
+          Expected status code
+          {/* react95's NumberInput only ever calls onChange from its
                 increment/decrement buttons — for a controlled instance
                 (value + onChange, the only sane way to use it), its
                 internal useControlledOrUncontrolled hook makes the
@@ -101,53 +100,58 @@ export function CreateMonitorForm({ onCreated, onCancel }: CreateMonitorFormProp
                 nothing at all. TextInput type="number" is the same
                 underlying primitive NumberInput itself wraps, minus the
                 broken bridge. */}
-            <TextInput
-              type="number"
-              min={100}
-              max={599}
-              value={expectedStatus}
-              onChange={(event) => setExpectedStatus(Number(event.target.value))}
-            />
-          </label>
-          {fieldErrors.expected_status && <p role="alert">{fieldErrors.expected_status}</p>}
-
-          <label>
-            Check interval
-            <SelectNative
-              options={INTERVAL_OPTIONS}
-              value={String(intervalSeconds)}
-              onChange={(option) => setIntervalSeconds(Number(option.value) as MonitorInterval)}
-            />
-          </label>
-
-          <label>
-            Timeout (seconds)
-            <TextInput
-              type="number"
-              min={1}
-              max={30}
-              value={timeoutSeconds}
-              onChange={(event) => setTimeoutSeconds(Number(event.target.value))}
-            />
-          </label>
-          {fieldErrors.timeout_seconds && <p role="alert">{fieldErrors.timeout_seconds}</p>}
-
-          <ChannelMultiSelect
-            channels={channels.data?.results ?? []}
-            selectedIds={channelIds}
-            onChange={setChannelIds}
+          <TextInput
+            type="number"
+            min={100}
+            max={599}
+            value={expectedStatus}
+            onChange={(event) => setExpectedStatus(Number(event.target.value))}
           />
+        </Field>
+        {fieldErrors.expected_status && (
+          <FieldError role="alert">{fieldErrors.expected_status}</FieldError>
+        )}
 
-          {generalError && <p role="alert">{generalError}</p>}
+        <Field>
+          Check interval
+          <SelectNative
+            options={INTERVAL_OPTIONS}
+            value={String(intervalSeconds)}
+            onChange={(option) => setIntervalSeconds(Number(option.value) as MonitorInterval)}
+          />
+        </Field>
 
+        <Field $compact>
+          Timeout (seconds)
+          <TextInput
+            type="number"
+            min={1}
+            max={30}
+            value={timeoutSeconds}
+            onChange={(event) => setTimeoutSeconds(Number(event.target.value))}
+          />
+        </Field>
+        {fieldErrors.timeout_seconds && (
+          <FieldError role="alert">{fieldErrors.timeout_seconds}</FieldError>
+        )}
+
+        <ChannelMultiSelect
+          channels={channels.data?.results ?? []}
+          selectedIds={channelIds}
+          onChange={setChannelIds}
+        />
+
+        {generalError && <FieldError role="alert">{generalError}</FieldError>}
+
+        <FormActions>
           <Button type="submit" disabled={createMonitor.isPending}>
             {createMonitor.isPending ? 'Creating…' : 'Create monitor'}
           </Button>
           <Button type="button" onClick={onCancel}>
             Cancel
           </Button>
-        </form>
-      </WindowContent>
-    </Window>
+        </FormActions>
+      </FormFields>
+    </FormPanel>
   )
 }

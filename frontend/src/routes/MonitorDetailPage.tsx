@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Button, SelectNative, Window, WindowContent, WindowHeader } from 'react95'
+import { Button, SelectNative } from 'react95'
 import {
   useCheckHistory,
   useDeleteMonitor,
@@ -12,6 +12,7 @@ import type { MonitorStats, StatsPeriod } from '../api/types'
 import { CheckHistoryList } from '../components/CheckHistoryList'
 import { MonitorEditForm } from '../components/MonitorEditForm'
 import { NavBar } from '../components/NavBar'
+import { PageLayout } from '../components/PageLayout'
 import { OpenIncidentFlag } from '../components/OpenIncidentFlag'
 import { StatusBadge } from '../components/StatusBadge'
 import { StatsChart } from '../components/StatsChart'
@@ -79,94 +80,104 @@ export function MonitorDetailPage() {
     deleteMonitor.mutate(id, { onSuccess: () => navigate('/dashboard', { replace: true }) })
   }
 
+  // Each of these used to return bare markup with no window around it,
+  // which left a stray line of text (or the whole edit form) floating in
+  // the corner of the desktop instead of inside the page it belongs to.
   if (monitor.isLoading) {
-    return <p>Loading…</p>
+    return (
+      <PageLayout title="Monitor" size="compact">
+        <p>Loading…</p>
+      </PageLayout>
+    )
   }
   if (monitor.isError || !monitor.data) {
-    return <p role="alert">Couldn't load this monitor.</p>
+    return (
+      <PageLayout title="Monitor" size="compact">
+        <p role="alert">Couldn't load this monitor.</p>
+      </PageLayout>
+    )
   }
 
   if (isEditing) {
     return (
-      <MonitorEditForm
-        monitor={monitor.data}
-        onSaved={() => setIsEditing(false)}
-        onCancel={() => setIsEditing(false)}
-      />
+      <PageLayout title={`Edit ${monitor.data.name}`}>
+        <MonitorEditForm
+          monitor={monitor.data}
+          onSaved={() => setIsEditing(false)}
+          onCancel={() => setIsEditing(false)}
+        />
+      </PageLayout>
     )
   }
 
   const m = monitor.data
 
   return (
-    <Window>
-      <WindowHeader>{m.name}</WindowHeader>
-      <WindowContent>
-        <NavBar />
+    <PageLayout title={m.name}>
+      <NavBar />
 
-        <section>
-          <StatusBadge status={m.status} />
-          {m.open_incident_id && <OpenIncidentFlag />}
-          <p>{m.url}</p>
-          <p>
-            {m.method} · expects {m.expected_status} · every {m.interval_seconds}s · timeout{' '}
-            {m.timeout_seconds}s
-          </p>
-          <p>
-            Uptime (24h): {m.uptime_24h === null ? '—' : `${(m.uptime_24h * 100).toFixed(1)}%`} ·
-            Avg response (24h):{' '}
-            {m.avg_response_time_24h_ms === null ? '—' : `${m.avg_response_time_24h_ms} ms`}
-          </p>
-          <Button onClick={() => setIsEditing(true)}>Edit</Button>
-          {confirmingDelete ? (
-            <>
-              <span>Delete this monitor? This can't be undone.</span>
-              <Button onClick={handleDelete} disabled={deleteMonitor.isPending}>
-                {deleteMonitor.isPending ? 'Deleting…' : 'Confirm delete'}
-              </Button>
-              <Button onClick={() => setConfirmingDelete(false)}>Cancel</Button>
-            </>
-          ) : (
-            <Button onClick={() => setConfirmingDelete(true)}>Delete</Button>
-          )}
-        </section>
+      <section>
+        <StatusBadge status={m.status} />
+        {m.open_incident_id && <OpenIncidentFlag />}
+        <p>{m.url}</p>
+        <p>
+          {m.method} · expects {m.expected_status} · every {m.interval_seconds}s · timeout{' '}
+          {m.timeout_seconds}s
+        </p>
+        <p>
+          Uptime (24h): {m.uptime_24h === null ? '—' : `${(m.uptime_24h * 100).toFixed(1)}%`} · Avg
+          response (24h):{' '}
+          {m.avg_response_time_24h_ms === null ? '—' : `${m.avg_response_time_24h_ms} ms`}
+        </p>
+        <Button onClick={() => setIsEditing(true)}>Edit</Button>
+        {confirmingDelete ? (
+          <>
+            <span>Delete this monitor? This can't be undone.</span>
+            <Button onClick={handleDelete} disabled={deleteMonitor.isPending}>
+              {deleteMonitor.isPending ? 'Deleting…' : 'Confirm delete'}
+            </Button>
+            <Button onClick={() => setConfirmingDelete(false)}>Cancel</Button>
+          </>
+        ) : (
+          <Button onClick={() => setConfirmingDelete(true)}>Delete</Button>
+        )}
+      </section>
 
-        <section>
-          <Button onClick={handleCheckNow} disabled={triggerCheck.isPending || isWaitingForCheck}>
-            {isWaitingForCheck ? 'Waiting for result…' : 'Check now'}
-          </Button>
-        </section>
+      <section>
+        <Button onClick={handleCheckNow} disabled={triggerCheck.isPending || isWaitingForCheck}>
+          {isWaitingForCheck ? 'Waiting for result…' : 'Check now'}
+        </Button>
+      </section>
 
-        <section>
-          <label>
-            Period
-            <SelectNative
-              options={PERIOD_OPTIONS}
-              value={period}
-              onChange={(option) => setPeriod(option.value as StatsPeriod)}
-            />
-          </label>
-          {stats.isLoading && <p>Loading stats…</p>}
-          {stats.data && (
-            <>
-              <p>{formatPeriodSummary(stats.data.summary)}</p>
-              <StatsChart series={stats.data.series} />
-            </>
-          )}
-        </section>
+      <section>
+        <label>
+          Period
+          <SelectNative
+            options={PERIOD_OPTIONS}
+            value={period}
+            onChange={(option) => setPeriod(option.value as StatsPeriod)}
+          />
+        </label>
+        {stats.isLoading && <p>Loading stats…</p>}
+        {stats.data && (
+          <>
+            <p>{formatPeriodSummary(stats.data.summary)}</p>
+            <StatsChart series={stats.data.series} />
+          </>
+        )}
+      </section>
 
-        <section>
-          {checkHistory.isLoading && <p>Loading history…</p>}
-          {checkHistory.data && (
-            <CheckHistoryList
-              checks={checkHistory.data.pages.flatMap((page) => page.results)}
-              hasMore={checkHistory.hasNextPage}
-              isLoadingMore={checkHistory.isFetchingNextPage}
-              onLoadMore={() => checkHistory.fetchNextPage()}
-            />
-          )}
-        </section>
-      </WindowContent>
-    </Window>
+      <section>
+        {checkHistory.isLoading && <p>Loading history…</p>}
+        {checkHistory.data && (
+          <CheckHistoryList
+            checks={checkHistory.data.pages.flatMap((page) => page.results)}
+            hasMore={checkHistory.hasNextPage}
+            isLoadingMore={checkHistory.isFetchingNextPage}
+            onLoadMore={() => checkHistory.fetchNextPage()}
+          />
+        )}
+      </section>
+    </PageLayout>
   )
 }
