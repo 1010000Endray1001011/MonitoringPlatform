@@ -59,3 +59,10 @@ export const FormActions = styled.div`
   display: flex;
   gap: 8px;
 `
+
+// Small print under a field — the "why" a control needs but that doesn't
+// belong in its label, since a label's text becomes part of the control's
+// accessible name.
+export const FieldHint = styled.small`
+  opacity: 0.75;
+`

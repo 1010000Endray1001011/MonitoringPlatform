@@ -493,6 +493,7 @@ export interface components {
             readonly interval_seconds: components["schemas"]["IntervalSecondsEnum"];
             readonly timeout_seconds: number;
             readonly headers: unknown;
+            readonly body: string;
             readonly failure_threshold: number;
             readonly success_threshold: number;
             readonly is_enabled: boolean;
@@ -578,6 +579,7 @@ export interface components {
             interval_seconds?: components["schemas"]["IntervalSecondsEnum"];
             timeout_seconds?: number;
             headers?: unknown;
+            body?: string;
             failure_threshold?: number;
             success_threshold?: number;
         };
@@ -600,6 +602,7 @@ export interface components {
             interval_seconds?: components["schemas"]["IntervalSecondsEnum"];
             timeout_seconds?: number;
             headers?: unknown;
+            body?: string;
             failure_threshold?: number;
             success_threshold?: number;
             notification_channel_ids?: string[];
@@ -692,6 +695,7 @@ export interface components {
             interval_seconds?: components["schemas"]["IntervalSecondsEnum"];
             timeout_seconds?: number;
             headers?: unknown;
+            body?: string;
             failure_threshold?: number;
             success_threshold?: number;
             notification_channel_ids?: string[];

@@ -127,3 +127,62 @@ def test_blocked_target_never_reaches_the_network(settings):
 
     assert result.success is False
     assert result.error_type == BLOCKED_TARGET
+
+
+@responses.activate
+def test_post_body_is_sent_as_utf8_with_a_json_content_type_by_default():
+    responses.add(responses.POST, TARGET_URL, status=200, body="ok")
+
+    result = RequestsHttpProbe().probe(_request(method="POST", body='{"ping": "привет"}'))
+
+    assert result.success is True
+    sent = responses.calls[0].request
+    # Compared as bytes: the point is that the body left as UTF-8 rather
+    # than whatever encoding `requests` would have guessed on its own.
+    assert sent.body == '{"ping": "привет"}'.encode("utf-8")
+    assert sent.headers["Content-Type"] == "application/json"
+
+
+@responses.activate
+def test_an_explicit_content_type_is_not_overridden():
+    responses.add(responses.POST, TARGET_URL, status=200, body="ok")
+
+    RequestsHttpProbe().probe(
+        _request(
+            method="POST",
+            body="ping=1",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    )
+
+    assert (
+        responses.calls[0].request.headers["Content-Type"] == "application/x-www-form-urlencoded"
+    )
+
+
+@responses.activate
+def test_a_lowercase_content_type_header_still_counts_as_explicit():
+    # Header names are case-insensitive, so a user typing "content-type"
+    # must not end up with a second, conflicting Content-Type header.
+    responses.add(responses.POST, TARGET_URL, status=200, body="ok")
+
+    RequestsHttpProbe().probe(
+        _request(method="POST", body="<ping/>", headers={"content-type": "application/xml"})
+    )
+
+    sent_names = [name.lower() for name in responses.calls[0].request.headers]
+    assert sent_names.count("content-type") == 1
+    assert responses.calls[0].request.headers["content-type"] == "application/xml"
+
+
+@responses.activate
+def test_a_monitor_without_a_body_sends_none_at_all():
+    # Not b"" — an empty byte string would still make requests attach a
+    # Content-Length: 0 to what should be a plain bodyless GET.
+    responses.add(responses.GET, TARGET_URL, status=200, body="ok")
+
+    RequestsHttpProbe().probe(_request())
+
+    sent = responses.calls[0].request
+    assert sent.body is None
+    assert "Content-Type" not in sent.headers

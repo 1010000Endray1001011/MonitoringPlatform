@@ -1,7 +1,7 @@
 import pytest
 from rest_framework import status
 
-from apps.monitors.models import Monitor
+from apps.monitors.models import MAX_BODY_LENGTH, Monitor
 from tests.factories import MonitorFactory, NotificationChannelFactory, UserFactory
 
 pytestmark = pytest.mark.django_db
@@ -19,6 +19,58 @@ def test_create_monitor(authenticated_client, user, settings):
     assert response.status_code == status.HTTP_201_CREATED
     assert response.data["status"] == "NEW"
     assert Monitor.objects.filter(user=user, name="Prod API").exists()
+
+
+def test_create_post_monitor_with_a_request_body(authenticated_client, user):
+    response = authenticated_client.post(
+        "/api/v1/monitors/",
+        {
+            "name": "Prod API",
+            "url": "https://example.com/health",
+            "method": "POST",
+            "body": '{"probe": true}',
+        },
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    monitor = Monitor.objects.get(user=user, name="Prod API")
+    assert monitor.body == '{"probe": true}'
+
+    detail = authenticated_client.get(f"/api/v1/monitors/{monitor.id}/")
+    assert detail.data["body"] == '{"probe": true}'
+
+
+def test_create_monitor_rejects_a_body_on_a_get_monitor(authenticated_client):
+    response = authenticated_client.post(
+        "/api/v1/monitors/",
+        {
+            "name": "Prod API",
+            "url": "https://example.com/health",
+            "method": "GET",
+            "body": '{"probe": true}',
+        },
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "body" in response.data["error"]["details"]
+
+
+def test_create_monitor_rejects_an_oversized_body(authenticated_client):
+    response = authenticated_client.post(
+        "/api/v1/monitors/",
+        {
+            "name": "Prod API",
+            "url": "https://example.com/health",
+            "method": "POST",
+            "body": "x" * (MAX_BODY_LENGTH + 1),
+        },
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "body" in response.data["error"]["details"]
 
 
 def test_detail_with_a_malformed_uuid_is_a_clean_404(authenticated_client):

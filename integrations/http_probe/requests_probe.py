@@ -61,6 +61,28 @@ def _classify_connection_error(exc: BaseException) -> str:
     return CONNECTION_ERROR
 
 
+# Sending a body with no Content-Type leaves the target guessing, and most
+# APIs answer that guess with a 415 — which would look like a failing
+# monitor rather than a misconfigured one. JSON is the overwhelmingly
+# common case for the health endpoints this feature exists for, so it's the
+# default when a body is present and the user didn't say otherwise.
+#
+# Only a default: an explicit Content-Type in the monitor's own headers
+# always wins, and the lookup is case-insensitive because header names are
+# (a user typing "content-type" must not end up sending two of them).
+DEFAULT_BODY_CONTENT_TYPE = "application/json"
+
+
+def _headers_with_content_type(request: ProbeRequest) -> dict:
+    headers = dict(request.headers)
+    if not request.body:
+        return headers
+    if any(name.lower() == "content-type" for name in headers):
+        return headers
+    headers["Content-Type"] = DEFAULT_BODY_CONTENT_TYPE
+    return headers
+
+
 class RequestsHttpProbe:
     def probe(self, request: ProbeRequest) -> ProbeResult:
         parsed = requests.utils.urlparse(request.url)
@@ -79,7 +101,14 @@ class RequestsHttpProbe:
             response = requests.request(
                 request.method,
                 request.url,
-                headers=request.headers,
+                headers=_headers_with_content_type(request),
+                # Encoded here rather than handed over as a str: `requests`
+                # would otherwise pick an encoding itself, and a body that
+                # travels as latin-1 when the target expects UTF-8 fails in
+                # a way that looks like the target's fault. None (not b"")
+                # when there's no body, so a GET keeps sending no
+                # Content-Length at all.
+                data=request.body.encode("utf-8") if request.body else None,
                 timeout=(CONNECT_TIMEOUT_SECONDS, request.timeout_seconds),
                 # Following a redirect would mean connecting to a second
                 # URL that never went through either half of the SSRF

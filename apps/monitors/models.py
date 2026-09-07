@@ -16,6 +16,12 @@ from apps.common.validators import validate_monitor_url
 ALLOWED_INTERVALS = (60, 120, 300, 600, 900, 1800, 3600)
 
 
+# 8 KiB: comfortably more than any health-check payload needs (they tend to
+# be a few hundred bytes at most) while staying small enough that a worker
+# holding one per in-flight check costs nothing worth measuring.
+MAX_BODY_LENGTH = 8192
+
+
 class Monitor(UUIDPrimaryKeyModel, TimeStampedModel):
     """A single HTTP endpoint the user wants checked periodically.
 
@@ -62,6 +68,20 @@ class Monitor(UUIDPrimaryKeyModel, TimeStampedModel):
         default=10, validators=[MinValueValidator(1), MaxValueValidator(30)]
     )
     headers = models.JSONField(default=dict, blank=True)
+    # Sent as the request body on POST. Stored as text rather than JSON so
+    # a monitor isn't limited to JSON APIs — form-encoded, XML and plain
+    # text targets are all just as valid, and the Content-Type that says
+    # which one it is belongs in `headers` next to every other header
+    # rather than being inferred from the column type here.
+    #
+    # The cap is a resource guard, not a domain rule: every probe holds
+    # this string in worker memory and pushes it over the wire on a fixed
+    # schedule, so it's bounded well below anything that could matter.
+    # Unlike the numeric ranges below it isn't a database CheckConstraint —
+    # Postgres doesn't enforce max_length on a text column at all — it's
+    # enforced by the validator Django derives from max_length, which both
+    # full_clean() and the DRF serializer run.
+    body = models.TextField(blank=True, default="", max_length=MAX_BODY_LENGTH)
     failure_threshold = models.PositiveSmallIntegerField(
         default=2, validators=[MinValueValidator(1), MaxValueValidator(10)]
     )
@@ -136,6 +156,12 @@ class Monitor(UUIDPrimaryKeyModel, TimeStampedModel):
         # the model's clean() for you. on keeping domain rules out of the HTTP layer while still surfacing
         # them there as a normal 400.
         super().clean()
+        # A body only means something on POST. GET and HEAD have no
+        # defined semantics for one — proxies and servers are free to drop
+        # it — so accepting it there would store a setting that silently
+        # does nothing, which is worse than refusing it outright.
+        if self.body and self.method != self.Method.POST:
+            raise ValidationError({"body": "A request body is only supported for POST monitors."})
         if self.timeout_seconds is not None and self.interval_seconds is not None:
             if self.timeout_seconds >= self.interval_seconds:
                 raise ValidationError(

@@ -133,6 +133,77 @@ describe('DashboardPage', () => {
     expect(submittedBody?.timeout_seconds).toBe(25)
   })
 
+  it('offers a request body only for POST, and submits what was typed', async () => {
+    let submittedBody: { method?: string; body?: string } | undefined
+    let created = false
+    server.use(
+      http.get(`${BASE}/api/v1/monitors/`, () =>
+        HttpResponse.json(paginated(created ? [makeMonitor({ name: 'New Site' })] : [])),
+      ),
+      http.post(`${BASE}/api/v1/monitors/`, async ({ request }) => {
+        submittedBody = (await request.json()) as { method?: string; body?: string }
+        created = true
+        return HttpResponse.json(makeMonitor({ name: 'New Site' }), { status: 201 })
+      }),
+    )
+    renderDashboard()
+    await screen.findByText(/don't have any monitors yet/i)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New monitor' }))
+    // GET is the default, and a body makes no sense there — the field
+    // shouldn't exist at all until the method can actually carry one.
+    expect(screen.queryByLabelText('Request body')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Method'), { target: { value: 'POST' } })
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Site' } })
+    fireEvent.change(screen.getByLabelText('URL'), {
+      target: { value: 'https://newsite.example.com' },
+    })
+    fireEvent.change(screen.getByLabelText('Request body'), {
+      target: { value: '{"probe": true}' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Create monitor' }))
+
+    await screen.findByText('New Site')
+    expect(submittedBody?.method).toBe('POST')
+    expect(submittedBody?.body).toBe('{"probe": true}')
+  })
+
+  it('sends an empty body when the method is switched away from POST', async () => {
+    // The combination the API rejects outright: switching back to GET has
+    // to clear the body on the way out, not send a stale one.
+    let submittedBody: { method?: string; body?: string } | undefined
+    let created = false
+    server.use(
+      http.get(`${BASE}/api/v1/monitors/`, () =>
+        HttpResponse.json(paginated(created ? [makeMonitor({ name: 'New Site' })] : [])),
+      ),
+      http.post(`${BASE}/api/v1/monitors/`, async ({ request }) => {
+        submittedBody = (await request.json()) as { method?: string; body?: string }
+        created = true
+        return HttpResponse.json(makeMonitor({ name: 'New Site' }), { status: 201 })
+      }),
+    )
+    renderDashboard()
+    await screen.findByText(/don't have any monitors yet/i)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New monitor' }))
+    fireEvent.change(screen.getByLabelText('Method'), { target: { value: 'POST' } })
+    fireEvent.change(screen.getByLabelText('Request body'), {
+      target: { value: '{"probe": true}' },
+    })
+    fireEvent.change(screen.getByLabelText('Method'), { target: { value: 'GET' } })
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'New Site' } })
+    fireEvent.change(screen.getByLabelText('URL'), {
+      target: { value: 'https://newsite.example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Create monitor' }))
+
+    await screen.findByText('New Site')
+    expect(submittedBody?.method).toBe('GET')
+    expect(submittedBody?.body).toBe('')
+  })
+
   it('creates a monitor and returns to the list, which now includes it', async () => {
     let created = false
     server.use(

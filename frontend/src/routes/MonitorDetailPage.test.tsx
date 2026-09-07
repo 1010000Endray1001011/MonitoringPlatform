@@ -21,6 +21,7 @@ function makeMonitorDetail(overrides: Partial<MonitorDetail> = {}): MonitorDetai
     interval_seconds: 300,
     timeout_seconds: 10,
     headers: {},
+    body: '',
     failure_threshold: 2,
     success_threshold: 1,
     is_enabled: true,

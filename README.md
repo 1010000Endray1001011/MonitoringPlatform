@@ -14,7 +14,11 @@ Frontend: a React 19 + TypeScript SPA with a Windows-95-plus-cyberpunk look
 
 - **Monitors** — register a URL, an HTTP method, an expected status code, a
   check interval (60s–1h) and a timeout; the engine polls it in the
-  background and tracks consecutive successes/failures.
+  background and tracks consecutive successes/failures. POST monitors can
+  carry a request body (up to 8 KB, sent as UTF-8, `Content-Type` defaulting
+  to `application/json` unless you set your own header), so an endpoint that
+  only answers a real payload can be checked properly rather than probed
+  with an empty request.
 - **Incidents** — a monitor crossing its failure threshold opens an incident
   automatically; recovering closes it. Incidents can be acknowledged; a
   reconciliation job catches the rare case where one gets stuck open.

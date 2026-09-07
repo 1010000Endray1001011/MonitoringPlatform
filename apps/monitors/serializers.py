@@ -102,6 +102,7 @@ class MonitorDetailSerializer(serializers.ModelSerializer):
             "interval_seconds",
             "timeout_seconds",
             "headers",
+            "body",
             "failure_threshold",
             "success_threshold",
             "is_enabled",
@@ -179,6 +180,7 @@ class MonitorWriteSerializer(serializers.ModelSerializer):
             "interval_seconds",
             "timeout_seconds",
             "headers",
+            "body",
             "failure_threshold",
             "success_threshold",
             "notification_channel_ids",
@@ -210,6 +212,13 @@ class MonitorWriteSerializer(serializers.ModelSerializer):
         # the service and failing full_clean() there. On a PATCH that only
         # touches one of the two fields, fall back to the current value of
         # whichever side wasn't part of this request.
+        body = attrs.get("body", getattr(self.instance, "body", ""))
+        method = attrs.get("method", getattr(self.instance, "method", None))
+        if body and method != Monitor.Method.POST:
+            raise serializers.ValidationError(
+                {"body": "A request body is only supported for POST monitors."}
+            )
+
         timeout = attrs.get("timeout_seconds", getattr(self.instance, "timeout_seconds", None))
         interval = attrs.get("interval_seconds", getattr(self.instance, "interval_seconds", None))
         if timeout is not None and interval is not None and timeout >= interval:

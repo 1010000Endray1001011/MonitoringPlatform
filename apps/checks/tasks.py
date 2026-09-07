@@ -87,6 +87,7 @@ def run_check(self, monitor_id) -> None:
                 timeout_seconds=monitor.timeout_seconds,
                 expected_status=monitor.expected_status,
                 headers=monitor.headers,
+                body=monitor.body,
             )
         )
 

@@ -55,6 +55,10 @@ class ProbeRequest:
     timeout_seconds: int
     expected_status: int
     headers: dict
+    # Defaulted so every existing construction site — and every test that
+    # only cares about status codes — keeps working unchanged; a body is
+    # the exception, not the norm.
+    body: str = ""
 
 
 @dataclass(frozen=True)

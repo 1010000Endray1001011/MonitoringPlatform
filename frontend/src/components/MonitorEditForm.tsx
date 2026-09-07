@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react'
 import { Button, SelectNative, TextInput } from 'react95'
-import { Field, FieldError, FormActions, FormFields, FormPanel } from './FormPanel'
+import { Field, FieldError, FieldHint, FormActions, FormFields, FormPanel } from './FormPanel'
 import { describeNonFieldError, extractFieldErrors } from '../api/errors'
 import { useUpdateMonitor } from '../api/monitorDetail'
 import { useNotificationChannels } from '../api/notificationChannels'
@@ -22,6 +22,7 @@ export function MonitorEditForm({ monitor, onSaved, onCancel }: MonitorEditFormP
   const [name, setName] = useState(monitor.name)
   const [url, setUrl] = useState(monitor.url)
   const [method, setMethod] = useState<MonitorMethod>(monitor.method)
+  const [body, setBody] = useState(monitor.body)
   const [expectedStatus, setExpectedStatus] = useState(monitor.expected_status)
   const [intervalSeconds, setIntervalSeconds] = useState<MonitorInterval>(monitor.interval_seconds)
   const [timeoutSeconds, setTimeoutSeconds] = useState(monitor.timeout_seconds)
@@ -39,6 +40,10 @@ export function MonitorEditForm({ monitor, onSaved, onCancel }: MonitorEditFormP
         name,
         url,
         method,
+        // Cleared rather than sent when the method can't carry a body:
+        // the API rejects that combination, and the local state is kept so
+        // switching back to POST before saving doesn't lose what was typed.
+        body: method === 'POST' ? body : '',
         expected_status: expectedStatus,
         interval_seconds: intervalSeconds,
         timeout_seconds: timeoutSeconds,
@@ -87,6 +92,31 @@ export function MonitorEditForm({ monitor, onSaved, onCancel }: MonitorEditFormP
             onChange={(option) => setMethod(option.value as MonitorMethod)}
           />
         </Field>
+
+        {/* Only for POST: the API rejects a body on GET/HEAD, since
+            neither has defined semantics for one. Hidden rather than
+            disabled so the form never offers a control whose only
+            possible outcome is an error. */}
+        {method === 'POST' && (
+          <>
+            <Field>
+              Request body
+              <TextInput
+                name="body"
+                multiline
+                rows={5}
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                placeholder={'{"probe": true}'}
+              />
+            </Field>
+            <FieldHint>
+              Sent as-is, UTF-8. Content-Type defaults to application/json — set your own
+              Content-Type in the headers to override it.
+            </FieldHint>
+          </>
+        )}
+        {fieldErrors.body && <FieldError role="alert">{fieldErrors.body}</FieldError>}
 
         <Field $compact>
           Expected status code
