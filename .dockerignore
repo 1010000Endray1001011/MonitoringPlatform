@@ -1,0 +1,39 @@
+# Build context for docker/Dockerfile, which does `COPY . .` from the repo
+# root. Without this file that copy sweeps in the real .env — SECRET_KEY and
+# TELEGRAM_BOT_TOKEN included — and bakes it into an image layer, where it
+# stays readable to anyone who can pull the image even though compose
+# supplies those same values at runtime via env_file.
+.env
+.env.*
+!.env.example
+
+# The frontend has its own image built from its own context (./frontend), so
+# none of it belongs in the backend image. This is also the single biggest
+# win here: node_modules alone dwarfs everything the backend actually ships.
+frontend/
+
+# History, not code. Also carries every past value of every file, which is
+# the last thing that should travel inside a runtime image.
+.git/
+.github/
+
+# Local tooling state — all of it regenerated on demand, none of it valid
+# inside the image anyway (a host .venv is built against the host's Python).
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editor and OS noise.
+.idea/
+.vscode/
+.DS_Store
+
+# Private planning docs — gitignored, and equally out of place in an image.
+ARCHITECTURE.md
+docs/

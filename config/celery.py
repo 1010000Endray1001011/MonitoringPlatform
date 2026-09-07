@@ -1,10 +1,21 @@
-import os
-
 from celery import Celery
 from celery.schedules import crontab
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.local")
-
+# Deliberately does NOT set DJANGO_SETTINGS_MODULE.
+#
+# config/__init__.py imports this module, so Python runs it before *any*
+# `config.*` submodule — including config/wsgi.py. A setdefault here
+# therefore won every race: gunicorn's `config.wsgi:application` would find
+# the variable already set and its own setdefault("config.settings.production")
+# would quietly do nothing, so the containers ran local settings — DEBUG on,
+# ALLOWED_HOSTS ["*"], none of the production security headers — while the
+# code read as though they ran production.
+#
+# Choosing the settings module belongs to whatever starts the process:
+# manage.py defaults to local, wsgi/asgi default to production, and compose
+# sets it explicitly for every service. Celery has no entrypoint of its own
+# to do that from, so `celery -A config` needs DJANGO_SETTINGS_MODULE in the
+# environment (compose provides it; see the README for running it by hand).
 app = Celery("monitoringplatform")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()

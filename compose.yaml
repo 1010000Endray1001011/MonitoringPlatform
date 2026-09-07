@@ -5,6 +5,23 @@ x-app-build: &app-build
 x-app-env: &app-env
   DATABASE_URL: postgres://${POSTGRES_USER:-monitoringplatform}:${POSTGRES_PASSWORD:-monitoringplatform}@postgres:5432/${POSTGRES_DB:-monitoringplatform}
   REDIS_URL: redis://redis:6379/0
+  # Stated explicitly for every service rather than left to each entrypoint's
+  # own default: manage.py falls back to local, wsgi/asgi to production, and
+  # `celery -A config` has no default at all. One value here means the web
+  # container, the migrations its entrypoint runs, and both Celery processes
+  # can't end up on different settings from each other.
+  DJANGO_SETTINGS_MODULE: config.settings.production
+  # This stack serves plain http on localhost, so the two settings that
+  # assume TLS in front are turned off here — and only here. Both default to
+  # on in config/settings/production.py, which is what a real deployment
+  # behind a TLS terminator should keep.
+  #
+  # SECURE_SSL_REDIRECT would 301 http://localhost:8000 to https and nothing
+  # would answer; SECURE_HSTS_SECONDS would additionally teach the browser to
+  # refuse plain http to localhost for a year, which outlives the container
+  # and is a genuinely annoying thing to undo on a development machine.
+  SECURE_SSL_REDIRECT: "False"
+  SECURE_HSTS_SECONDS: "0"
 
 x-app-depends: &app-depends
   postgres:

@@ -40,7 +40,10 @@ cp .env.example .env
 docker compose up --build
 ```
 
-`web` runs migrations on startup and serves on `http://localhost:8000`.
+`web` runs migrations on startup and serves on `http://localhost:8000`, using
+the production settings module with `DEBUG` off — the HTTPS redirect and HSTS
+that those settings normally switch on are the only things compose overrides,
+since the bundled stack serves plain http on localhost.
 `celery-worker` and `celery-beat` start alongside it and immediately begin
 running the scheduled checks, hourly rollups, and retention jobs. `frontend`
 builds and serves the React UI on `http://localhost:5173`.
@@ -63,9 +66,17 @@ poetry run python manage.py runserver
 Run the background engine alongside it (nothing gets checked without these):
 
 ```bash
-poetry run celery -A config worker -l info -Q checks,notifications,maintenance
-poetry run celery -A config beat -l info
+DJANGO_SETTINGS_MODULE=config.settings.local poetry run celery -A config worker -l info -Q checks,notifications,maintenance
 ```
+
+```bash
+DJANGO_SETTINGS_MODULE=config.settings.local poetry run celery -A config beat -l info
+```
+
+`manage.py` and `runserver` default to the local settings on their own, but
+`celery -A config` has no entrypoint of its own to set that from, so it needs
+the variable spelled out. (Compose sets it for every service, so this only
+applies when running Celery by hand.)
 
 Frontend dev server, against the backend above:
 
