@@ -215,7 +215,7 @@ notable ones:
 | `CELERY_TASK_ALWAYS_EAGER` | `True` runs tasks inline with no worker — local debugging only. |
 | `MONITORING_ALLOW_PRIVATE_TARGETS` | Lets monitors target private/internal addresses. Must stay `False` outside local/test — this is the SSRF guard's off switch. Production refuses to start if it's `True`. |
 | `TELEGRAM_BOT_TOKEN` | One bot for the whole platform; each channel only stores which `chat_id` to message. |
-| `EMAIL_BACKEND` | Defaults to the console backend — notifications print to the server log instead of sending real email. |
+| `EMAIL_BACKEND` | Defaults to the console backend — notifications print to the server log instead of sending real email. Switch to the SMTP backend and set the `EMAIL_*` variables below to deliver real mail. |
 
 See [`frontend/.env.example`](frontend/.env.example) for the frontend's own
 (much shorter) list — just `VITE_API_BASE_URL`, baked into the static bundle
@@ -224,6 +224,42 @@ start), which is why Docker Compose passes it as a build arg rather than a
 runtime environment variable.
 
 Never commit a real `.env` — it's gitignored.
+
+### Sending real email
+
+Out of the box, email notifications go to the server log and nowhere else.
+To deliver them, switch the backend and fill in the connection details:
+
+```bash
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=you@gmail.com
+EMAIL_HOST_PASSWORD=your-app-password
+EMAIL_USE_TLS=True
+EMAIL_TIMEOUT=10
+DEFAULT_FROM_EMAIL=you@gmail.com
+```
+
+Three things that are easy to get wrong:
+
+- **Use an App Password, not your account password.** Gmail only issues one
+  once two-factor authentication is on, and rejects the account password
+  outright. Other providers have the same concept under different names.
+- **`DEFAULT_FROM_EMAIL` must match `EMAIL_HOST_USER`.** Providers rewrite or
+  reject a `From` they haven't authenticated, and report it as an opaque 5xx
+  that reads like a server fault.
+- **`EMAIL_USE_TLS` and `EMAIL_USE_SSL` are mutually exclusive.** Use TLS for
+  port 587 (STARTTLS) and SSL for 465; setting both fails at startup with a
+  message saying so.
+
+The `EMAIL_*` variables are only read when `EMAIL_BACKEND` is the SMTP one.
+Every other backend rejects unknown connection options and would fail to
+start, so they're passed along only when SMTP is actually selected.
+
+Verify it end to end from the UI: create an EMAIL notification channel on
+the Channels page and press **Verify** — that sends a real message
+synchronously and reports the failure inline if the provider refuses it.
 
 ## Project layout
 

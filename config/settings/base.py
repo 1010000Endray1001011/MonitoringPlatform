@@ -2,6 +2,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -122,13 +123,70 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
+# Underscored because Django 6.1 refuses to start when the deprecated
+# EMAIL_BACKEND setting is defined alongside MAILERS ("Deprecated email
+# settings are not allowed when MAILERS is defined"). The environment
+# variable keeps the familiar name; only the settings-module name differs.
+_EMAIL_BACKEND = env.str("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
+
+SMTP_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+
+
+def _build_mailer_options(backend: str, env: environ.Env) -> dict:
+    """Connection options for MAILERS["default"], or {} for a backend that
+    doesn't take any.
+
+    Django hands this dict to the backend class as keyword arguments, and
+    every backend rejects keys it doesn't recognise — the console backend
+    used by default in development fails to start outright with
+    "Unknown options 'host', 'port'". So these can't be set unconditionally:
+    doing that breaks `docker compose up` for anyone who hasn't configured
+    SMTP, which is everyone on a fresh clone.
+
+    Underscore-prefixed so `from .base import *` in the per-environment
+    settings modules doesn't re-export a helper as though it were a setting.
+    """
+    if backend != SMTP_BACKEND:
+        return {}
+
+    # Two ways to encrypt SMTP, and they're mutually exclusive: implicit TLS
+    # on port 465 (use_ssl) or STARTTLS on 587 (use_tls). Defaulting use_tls
+    # to the opposite of use_ssl means setting only EMAIL_USE_SSL=True does
+    # the right thing, instead of silently colliding with a use_tls that
+    # defaulted to True on its own.
+    use_ssl = env.bool("EMAIL_USE_SSL", default=False)
+    use_tls = env.bool("EMAIL_USE_TLS", default=not use_ssl)
+
+    if use_ssl and use_tls:
+        raise ImproperlyConfigured(
+            "EMAIL_USE_SSL and EMAIL_USE_TLS are mutually exclusive — set one, not both. "
+            "Use EMAIL_USE_SSL for port 465, EMAIL_USE_TLS for port 587."
+        )
+
+    return {
+        "host": env.str("EMAIL_HOST", default="localhost"),
+        "port": env.int("EMAIL_PORT", default=587),
+        "username": env.str("EMAIL_HOST_USER", default=""),
+        "password": env.str("EMAIL_HOST_PASSWORD", default=""),
+        "use_ssl": use_ssl,
+        "use_tls": use_tls,
+        # Without this a hung SMTP server holds the Celery worker that's
+        # sending the notification for as long as the OS lets the socket
+        # sit there. The HTTP probe has had its own timeout from the start;
+        # this is the same reasoning applied to the other outbound call.
+        "timeout": env.int("EMAIL_TIMEOUT", default=10),
+    }
+
+
 MAILERS = {
     "default": {
-        "BACKEND": env.str(
-            "EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
-        ),
+        "BACKEND": _EMAIL_BACKEND,
+        "OPTIONS": _build_mailer_options(_EMAIL_BACKEND, env),
     },
 }
+
+# Must match EMAIL_HOST_USER on providers that check it — Gmail rewrites or
+# rejects a From it hasn't authenticated, and reports it as an opaque 5xx.
 DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="alerts@monitoringplatform.local")
 
 
