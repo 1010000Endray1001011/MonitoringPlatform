@@ -288,6 +288,26 @@ export interface paths {
         patch: operations["notification_channels_partial_update"];
         trace?: never;
     };
+    "/api/v1/notification-channels/{id}/telegram-link/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a fresh Telegram connect link
+         * @description Replaces this channel's one-time connect link with a new one and returns the channel carrying it in telegram_deep_link. Only the most recently issued link works, so this also invalidates the previous one. Used when the original link expired before it was tapped.
+         */
+        post: operations["notification_channels_telegram_link_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notification-channels/{id}/verify/": {
         parameters: {
             query?: never;
@@ -615,6 +635,7 @@ export interface components {
             config?: unknown;
             readonly is_verified: boolean;
             is_active?: boolean;
+            readonly telegram_deep_link: string | null;
             readonly last_error: string | null;
             /** Format: date-time */
             readonly last_error_at: string | null;
@@ -1402,6 +1423,28 @@ export interface operations {
                 "multipart/form-data": components["schemas"]["PatchedNotificationChannelRequest"];
             };
         };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannel"];
+                };
+            };
+        };
+    };
+    notification_channels_telegram_link_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A UUID string identifying this notification channel. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             200: {
                 headers: {

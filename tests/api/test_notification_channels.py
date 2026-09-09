@@ -33,22 +33,89 @@ def test_create_email_channel_rejects_missing_email_key(authenticated_client):
 def test_create_rejects_a_config_that_does_not_match_the_type(authenticated_client):
     response = authenticated_client.post(
         "/api/v1/notification-channels/",
-        {"type": "TELEGRAM", "name": "Bad", "config": {"email": "a@example.com"}},
+        {"type": "EMAIL", "name": "Bad", "config": {"chat_id": "12345"}},
         format="json",
     )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
-def test_create_telegram_channel_rejects_missing_chat_id(authenticated_client):
+def test_create_telegram_channel_starts_unconnected_with_a_connect_link(
+    authenticated_client, settings
+):
+    # A Telegram channel can't carry a chat_id at creation: bots can't
+    # message anyone who hasn't written to them first. It starts as a
+    # placeholder plus the link that will connect it.
+    settings.TELEGRAM_BOT_USERNAME = "test_bot"
+
     response = authenticated_client.post(
         "/api/v1/notification-channels/",
-        {"type": "TELEGRAM", "name": "Bad", "config": {}},
+        {"type": "TELEGRAM", "name": "My phone", "config": {"username": "someone"}},
         format="json",
     )
 
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert "config" in response.data["error"]["details"]
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["is_verified"] is False
+    assert response.data["telegram_deep_link"].startswith("https://t.me/test_bot?start=")
+
+
+def test_a_client_supplied_chat_id_is_ignored(authenticated_client):
+    # Security-relevant: accepting a chat_id from the request body would let
+    # anyone point a channel at a stranger's chat and bury them in someone
+    # else's incident alerts. The only path to a chat_id is the handshake.
+    response = authenticated_client.post(
+        "/api/v1/notification-channels/",
+        {
+            "type": "TELEGRAM",
+            "name": "Sneaky",
+            "config": {"username": "someone", "chat_id": "999999"},
+        },
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert "chat_id" not in response.data["config"]
+    assert response.data["is_verified"] is False
+
+
+def test_telegram_link_action_issues_a_fresh_link(authenticated_client, user, settings):
+    settings.TELEGRAM_BOT_USERNAME = "test_bot"
+    created = authenticated_client.post(
+        "/api/v1/notification-channels/",
+        {"type": "TELEGRAM", "name": "My phone", "config": {"username": "someone"}},
+        format="json",
+    )
+    first_link = created.data["telegram_deep_link"]
+
+    response = authenticated_client.post(
+        f"/api/v1/notification-channels/{created.data['id']}/telegram-link/"
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["telegram_deep_link"] != first_link
+
+
+def test_telegram_link_action_rejects_an_email_channel(authenticated_client, user):
+    channel = NotificationChannelFactory(user=user, type=NotificationChannel.ChannelType.EMAIL)
+
+    response = authenticated_client.post(
+        f"/api/v1/notification-channels/{channel.id}/telegram-link/"
+    )
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+
+
+def test_verify_refuses_a_telegram_channel_that_is_not_connected_yet(authenticated_client, user):
+    channel = NotificationChannelFactory(
+        user=user,
+        type=NotificationChannel.ChannelType.TELEGRAM,
+        config={"username": "someone"},
+        is_verified=False,
+    )
+
+    response = authenticated_client.post(f"/api/v1/notification-channels/{channel.id}/verify/")
+
+    assert response.status_code == status.HTTP_409_CONFLICT
 
 
 def test_list_only_returns_the_caller_s_own_channels(authenticated_client, user):

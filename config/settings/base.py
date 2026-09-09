@@ -363,3 +363,14 @@ MONITORING_ALLOWED_PORTS = [80, 443, 8080, 8443]
 MONITORING_ALLOW_PRIVATE_TARGETS = env.bool("MONITORING_ALLOW_PRIVATE_TARGETS", default=False)
 
 TELEGRAM_BOT_TOKEN = env.str("TELEGRAM_BOT_TOKEN", default="")
+
+# Only used to build the t.me link a user taps to connect their chat — the
+# bot's own @name, which the token alone doesn't reveal without a getMe
+# call. Set explicitly rather than fetched at startup so nothing in a
+# request path depends on Telegram being reachable; the cost is that it has
+# to be kept in step with the token by hand.
+TELEGRAM_BOT_USERNAME = env.str("TELEGRAM_BOT_USERNAME", default="")
+
+# How long a connect link stays usable. Long enough to walk to your phone,
+# short enough that a link left in a browser tab stops working.
+TELEGRAM_CLAIM_TTL_MINUTES = env.int("TELEGRAM_CLAIM_TTL_MINUTES", default=30)

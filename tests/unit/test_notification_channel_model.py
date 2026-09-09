@@ -19,16 +19,19 @@ def test_email_channel_with_an_email_key_is_valid():
     channel.clean()  # must not raise
 
 
-def test_telegram_channel_requires_a_chat_id_key():
+def test_telegram_channel_is_valid_with_an_empty_config():
+    # A chat_id cannot exist yet: Telegram bots can't message someone who
+    # hasn't written to them first, so the id only arrives once the user
+    # taps the connect link and the bot receives their /start. Until then
+    # the channel is a placeholder, which is what is_verified=False says.
     channel = NotificationChannel(type=NotificationChannel.ChannelType.TELEGRAM, config={})
 
-    with pytest.raises(ValidationError):
-        channel.clean()
+    channel.clean()  # must not raise
 
 
-def test_telegram_channel_with_a_chat_id_key_is_valid():
+def test_telegram_channel_with_a_declared_username_is_valid():
     channel = NotificationChannel(
-        type=NotificationChannel.ChannelType.TELEGRAM, config={"chat_id": "12345"}
+        type=NotificationChannel.ChannelType.TELEGRAM, config={"username": "someone"}
     )
 
     channel.clean()  # must not raise

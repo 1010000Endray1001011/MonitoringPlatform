@@ -17,6 +17,7 @@ function makeChannel(overrides: Partial<NotificationChannel> = {}): Notification
     name: 'Personal email',
     config: { email: 'dev@example.com' },
     is_verified: false,
+    telegram_deep_link: null,
     is_active: true,
     last_error: null,
     last_error_at: null,
@@ -53,7 +54,75 @@ describe('ChannelsPage', () => {
     expect(await screen.findByText('Personal email')).toBeInTheDocument()
     expect(screen.getByText('Verified')).toBeInTheDocument()
     expect(screen.getByText('Ops chat')).toBeInTheDocument()
-    expect(screen.getByText('Not verified')).toBeInTheDocument()
+    // An unconnected Telegram channel isn't "not verified" in the sense a
+    // failed email channel is — nothing has gone wrong, it's waiting on the
+    // user to press Start in the bot.
+    expect(screen.getByText('Waiting for Start')).toBeInTheDocument()
+  })
+
+  it('offers the connect link instead of a verify button for an unconnected Telegram channel', async () => {
+    mockChannels([
+      makeChannel({
+        name: 'Ops chat',
+        type: 'TELEGRAM',
+        is_verified: false,
+        telegram_deep_link: 'https://t.me/test_bot?start=abc123',
+      }),
+    ])
+    renderWithProviders(<ChannelsPage />)
+
+    const link = await screen.findByRole('link', { name: /press start/i })
+    expect(link).toHaveAttribute('href', 'https://t.me/test_bot?start=abc123')
+    // Verifying would only ever fail: the bot cannot message a chat that
+    // hasn't started a conversation with it.
+    expect(screen.queryByRole('button', { name: 'Verify' })).not.toBeInTheDocument()
+  })
+
+  it('asks for a fresh link when the previous one has expired', async () => {
+    mockChannels([makeChannel({ name: 'Ops chat', type: 'TELEGRAM', is_verified: false })])
+    server.use(
+      http.post(`${BASE}/api/v1/notification-channels/:id/telegram-link/`, () =>
+        HttpResponse.json(
+          makeChannel({
+            name: 'Ops chat',
+            type: 'TELEGRAM',
+            is_verified: false,
+            telegram_deep_link: 'https://t.me/test_bot?start=fresh',
+          }),
+        ),
+      ),
+    )
+    renderWithProviders(<ChannelsPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Get a new link' }))
+
+    const link = await screen.findByRole('link', { name: /press start/i })
+    expect(link).toHaveAttribute('href', 'https://t.me/test_bot?start=fresh')
+  })
+
+  it('creates a Telegram channel with a username and no chat id', async () => {
+    let submitted: { config?: Record<string, unknown> } | undefined
+    mockChannels([])
+    server.use(
+      http.post(`${BASE}/api/v1/notification-channels/`, async ({ request }) => {
+        submitted = (await request.json()) as { config?: Record<string, unknown> }
+        return HttpResponse.json(makeChannel({ type: 'TELEGRAM' }), { status: 201 })
+      }),
+    )
+    renderWithProviders(<ChannelsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'New channel' }))
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ops chat' } })
+    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'TELEGRAM' } })
+    fireEvent.change(screen.getByLabelText('Telegram username'), {
+      target: { value: '@someone' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Create channel' }))
+
+    await waitFor(() => expect(submitted).toBeDefined())
+    // chat_id is assigned by the connect handshake; the API ignores one
+    // sent from here, so the form must not pretend to set it.
+    expect(submitted?.config).toEqual({ username: '@someone' })
   })
 
   it('shows the empty state with no channels', async () => {
