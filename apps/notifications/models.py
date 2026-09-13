@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import UniqueConstraint
+from django.utils import timezone
 
 from apps.common.models import TimeStampedModel, UUIDPrimaryKeyModel
 
@@ -32,7 +33,13 @@ class NotificationChannel(UUIDPrimaryKeyModel, TimeStampedModel):
     )
     type = models.CharField(max_length=10, choices=ChannelType.choices)
     name = models.CharField(max_length=100)
-    config = models.JSONField(default=dict)
+    # blank=True because a Telegram channel legitimately starts out with an
+    # empty config: the chat_id doesn't exist until the user taps the
+    # connect link, and declaring a username is optional. Field-level
+    # validation would otherwise reject {} before clean() ever runs, and
+    # clean() is where the per-type rules actually live — EMAIL still can't
+    # be blank, because it requires an 'email' key there.
+    config = models.JSONField(default=dict, blank=True)
     is_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     last_error_at = models.DateTimeField(null=True, blank=True)
@@ -53,8 +60,56 @@ class NotificationChannel(UUIDPrimaryKeyModel, TimeStampedModel):
         config = self.config if isinstance(self.config, dict) else {}
         if self.type == self.ChannelType.EMAIL and not config.get("email"):
             raise ValidationError({"config": "EMAIL channels require a 'email' key."})
-        if self.type == self.ChannelType.TELEGRAM and not config.get("chat_id"):
-            raise ValidationError({"config": "TELEGRAM channels require a 'chat_id' key."})
+        # TELEGRAM deliberately requires nothing at write time. A chat_id
+        # can't be known yet: Telegram bots cannot message a user who
+        # hasn't started a conversation first, so the id only exists once
+        # the user has tapped the connect link and the bot has received
+        # their /start. Until then the channel is a placeholder waiting to
+        # be claimed, which is exactly what `is_verified = False` means.
+        #
+        # `username` is optional rather than required: it's a cross-check
+        # ("I expect this chat to belong to @me"), and Telegram accounts
+        # are not obliged to have a username at all. The claim token, not
+        # the username, is what actually identifies the channel.
+
+
+class TelegramClaim(UUIDPrimaryKeyModel, TimeStampedModel):
+    """A one-time link that binds a Telegram chat to a channel.
+
+    Exists because a bot cannot start a conversation — the user has to
+    message it first, and something has to tell us *which* channel that
+    message is about. The token travels in the `/start <token>` deep link,
+    so the incoming update identifies the channel exactly, with no reliance
+    on usernames (which are optional, re-assignable, and would let one user
+    aim a channel at another user's chat).
+
+    A separate model rather than columns on NotificationChannel: the poller
+    looks a token up on every incoming update, which wants a real unique
+    index, and NotificationChannel shouldn't grow fields that only one of
+    its types ever uses.
+
+    OneToOne, so re-issuing a link replaces the previous one rather than
+    leaving several usable at once. Claimed rows are kept (not deleted) so
+    that a user tapping the same link twice gets "already connected"
+    instead of "invalid link".
+    """
+
+    channel = models.OneToOneField(
+        NotificationChannel, on_delete=models.CASCADE, related_name="telegram_claim"
+    )
+    token = models.CharField(max_length=64, unique=True)
+    expires_at = models.DateTimeField()
+    claimed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        state = "claimed" if self.claimed_at else "pending"
+        return f"TelegramClaim({self.channel_id}, {state})"
+
+    def is_expired(self, *, now=None) -> bool:
+        return (now or timezone.now()) >= self.expires_at
 
 
 class NotificationDelivery(UUIDPrimaryKeyModel, TimeStampedModel):

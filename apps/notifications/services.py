@@ -13,14 +13,19 @@ Application/service layer for notification channels and delivery.
   since no user action sends a notification on its own.
 """
 
+import secrets
+from dataclasses import dataclass
+from datetime import timedelta
+
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
-from apps.common.exceptions import DomainError
+from apps.common.exceptions import ConflictError, DomainError
 
-from .models import NotificationChannel, NotificationDelivery
+from .models import NotificationChannel, NotificationDelivery, TelegramClaim
 from .providers import get_provider
 
 
@@ -41,6 +46,11 @@ def create_channel(*, user, **fields) -> NotificationChannel:
     channel = NotificationChannel(user=user, **fields)
     _full_clean_or_raise(channel)
     channel.save()
+    if channel.type == NotificationChannel.ChannelType.TELEGRAM:
+        # A Telegram channel is useless until a chat has been bound to it,
+        # and binding needs a link — so the link exists from the moment the
+        # channel does, rather than making the caller ask for one.
+        issue_telegram_claim(channel=channel)
     return channel
 
 
@@ -68,6 +78,18 @@ def verify_channel(*, channel: NotificationChannel) -> NotificationChannel:
     the only synchronous provider call in the system, because the user is
     actively waiting on this one instead of it happening in the background.
     """
+    if channel.type == NotificationChannel.ChannelType.TELEGRAM and not channel.config.get(
+        "chat_id"
+    ):
+        # Nothing to verify yet, and attempting the send would produce a
+        # provider error about a missing chat_id — technically accurate,
+        # useless as an explanation. The user isn't misconfigured, they
+        # just haven't tapped the link yet.
+        raise ConflictError(
+            "This Telegram channel isn't connected yet — open the connect link and press Start "
+            "in the bot first."
+        )
+
     provider = get_provider(channel.type)
     result = provider.send(
         channel.config,
@@ -180,3 +202,129 @@ def _render_message(delivery: NotificationDelivery) -> tuple[str, str]:
     if incident.duration_seconds is not None:
         message += f" Total downtime: {incident.duration_seconds} seconds."
     return subject, message
+
+
+# --- Telegram chat claiming ------------------------------------------------
+#
+# A bot can't message a user who hasn't written to it first, so a Telegram
+# channel is created empty and filled in when the user taps a one-time link
+# and presses Start. Everything below is that handshake: issuing the link,
+# and resolving the /start the bot receives back into a bound chat.
+
+
+def issue_telegram_claim(*, channel: NotificationChannel) -> TelegramClaim:
+    """Create (or replace) the one-time link for a Telegram channel.
+
+    Replacing rather than adding: only the most recently issued link should
+    work, so a link someone left open in an old tab stops being usable the
+    moment a new one is generated.
+    """
+    TelegramClaim.objects.filter(channel=channel).delete()
+    return TelegramClaim.objects.create(
+        channel=channel,
+        # token_urlsafe stays inside Telegram's allowed alphabet for a
+        # /start payload (letters, digits, - and _), so it needs no
+        # encoding on the way into the deep link.
+        token=secrets.token_urlsafe(24),
+        expires_at=timezone.now() + timedelta(minutes=settings.TELEGRAM_CLAIM_TTL_MINUTES),
+    )
+
+
+def telegram_deep_link(*, channel: NotificationChannel) -> str | None:
+    """The t.me link to show the user, or None when there's nothing to show
+    — already connected, never issued, expired, or no bot username set."""
+    if not settings.TELEGRAM_BOT_USERNAME:
+        return None
+    claim = getattr(channel, "telegram_claim", None)
+    if claim is None or claim.claimed_at is not None or claim.is_expired():
+        return None
+    return f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start={claim.token}"
+
+
+@dataclass(frozen=True)
+class ClaimOutcome:
+    """What the bot should say back, and whether anything was bound.
+
+    The reply text lives here rather than in the polling task because the
+    decision and the wording are the same thing — "why didn't this work" is
+    the only useful thing the bot can tell a user standing in the chat.
+    """
+
+    reply: str
+    linked: bool = False
+
+
+def _normalise_username(value: str | None) -> str:
+    return (value or "").lstrip("@").strip().lower()
+
+
+@transaction.atomic
+def claim_telegram_chat(*, token: str, chat_id: str, username: str | None) -> ClaimOutcome:
+    """Resolve a `/start <token>` into a bound channel.
+
+    Called from the polling task for every incoming start command. Every
+    path returns an outcome rather than raising: the caller's job is to
+    reply to a person in a chat window, not to handle exceptions.
+    """
+    try:
+        claim = (
+            TelegramClaim.objects.select_for_update().select_related("channel").get(token=token)
+        )
+    except TelegramClaim.DoesNotExist:
+        return ClaimOutcome(
+            reply=(
+                "This connect link isn't valid. Open the Channels page in Uptime Monitoring "
+                "Platform and start a new Telegram channel to get a fresh one."
+            )
+        )
+
+    channel = claim.channel
+
+    if claim.claimed_at is not None:
+        # Tapping the same link twice is the most likely repeat, and it's
+        # harmless — but only for the chat that already owns it.
+        if str(channel.config.get("chat_id")) == str(chat_id):
+            return ClaimOutcome(reply=f"'{channel.name}' is already connected to this chat.")
+        return ClaimOutcome(reply="This connect link has already been used.")
+
+    if claim.is_expired():
+        return ClaimOutcome(
+            reply=(
+                "This connect link has expired. Open the Channels page and press "
+                "'Get a new link' to generate another one."
+            )
+        )
+
+    expected = _normalise_username(channel.config.get("username"))
+    actual = _normalise_username(username)
+    if expected and expected != actual:
+        # The declared username is a cross-check, not the identity: the
+        # token already proved which channel this is. Refusing on mismatch
+        # is what makes "I said @me, so I get @me" literally true.
+        return ClaimOutcome(
+            reply=(
+                f"This link expects @{expected}, but you're signed in as "
+                f"{('@' + actual) if actual else 'an account with no username'}. "
+                "Nothing was connected."
+            )
+        )
+
+    channel.config = {**channel.config, "chat_id": str(chat_id)}
+    if actual:
+        # Record what Telegram actually reported, so the channel shows the
+        # real account rather than whatever was typed into the form.
+        channel.config["username"] = actual
+    channel.is_verified = True
+    channel.last_error = None
+    channel.last_error_at = None
+    channel.save(
+        update_fields=["config", "is_verified", "last_error", "last_error_at", "updated_at"]
+    )
+
+    claim.claimed_at = timezone.now()
+    claim.save(update_fields=["claimed_at", "updated_at"])
+
+    return ClaimOutcome(
+        reply=f"'{channel.name}' is connected. Incident alerts will arrive here.",
+        linked=True,
+    )

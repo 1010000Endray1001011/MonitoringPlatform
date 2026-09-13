@@ -10,6 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from apps.common.exceptions import ConflictError
 from apps.common.permissions import IsOwner
 
 from . import services
@@ -66,4 +67,29 @@ class NotificationChannelViewSet(viewsets.ModelViewSet):
         # — the caller is waiting to find out whether this channel works,
         # unlike every other notification, which goes through the outbox.
         channel = services.verify_channel(channel=self.get_object())
+        return Response(NotificationChannelSerializer(channel).data)
+
+    @extend_schema(
+        request=None,
+        responses=NotificationChannelSerializer,
+        summary="Issue a fresh Telegram connect link",
+        description=(
+            "Replaces this channel's one-time connect link with a new one and "
+            "returns the channel carrying it in telegram_deep_link. Only the most "
+            "recently issued link works, so this also invalidates the previous "
+            "one. Used when the original link expired before it was tapped."
+        ),
+    )
+    @action(detail=True, methods=["post"], url_path="telegram-link")
+    def telegram_link(self, request: Request, pk=None) -> Response:
+        channel = self.get_object()
+        if channel.type != NotificationChannel.ChannelType.TELEGRAM:
+            raise ConflictError("Connect links only apply to Telegram channels.")
+
+        services.issue_telegram_claim(channel=channel)
+        # Re-read rather than reuse the instance in hand: the old claim was
+        # deleted and a new one created, but this object still has the
+        # previous one cached on its reverse relation, so serializing it as
+        # is would hand back the link that was just invalidated.
+        channel = self.get_queryset().get(pk=channel.pk)
         return Response(NotificationChannelSerializer(channel).data)

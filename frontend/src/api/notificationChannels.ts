@@ -11,11 +11,45 @@ import type {
 // into the key.
 export const channelsQueryKey = ['notification-channels'] as const
 
+// A Telegram channel becomes connected without the browser doing anything:
+// the user presses Start in the bot, and a background task on the server
+// binds the chat. Polling while any channel is in that state is what turns
+// the row from "waiting" into "verified" on its own — five seconds is short
+// enough to feel immediate next to walking to your phone, and the polling
+// stops the moment nothing is waiting.
+const WAITING_POLL_MS = 5000
+
 export function useNotificationChannels() {
   return useQuery({
     queryKey: channelsQueryKey,
     queryFn: () =>
       apiClient.get<PaginatedNotificationChannelList>('/api/v1/notification-channels/'),
+    refetchInterval: (query) => {
+      const waiting = (query.state.data?.results ?? []).some(
+        (channel) =>
+          channel.type === 'TELEGRAM' && !channel.is_verified && channel.telegram_deep_link,
+      )
+      return waiting ? WAITING_POLL_MS : false
+    },
+  })
+}
+
+export function useIssueTelegramLink(id: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiClient.post<NotificationChannel>(`/api/v1/notification-channels/${id}/telegram-link/`),
+    // The response is the channel carrying its new link, so patch it into
+    // the cached list rather than refetching the whole thing.
+    onSuccess: (data) => {
+      queryClient.setQueryData<PaginatedNotificationChannelList>(channelsQueryKey, (old) => {
+        if (!old) return old
+        return {
+          ...old,
+          results: old.results.map((channel) => (channel.id === data.id ? data : channel)),
+        }
+      })
+    },
   })
 }
 

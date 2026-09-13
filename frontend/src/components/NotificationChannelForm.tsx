@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react'
 import { Button, SelectNative, TextInput } from 'react95'
-import { Field, FieldError, FormActions, FormFields, FormPanel } from './FormPanel'
+import { Field, FieldError, FieldHint, FormActions, FormFields, FormPanel } from './FormPanel'
 import { describeNonFieldError, extractFieldErrors } from '../api/errors'
 import { useCreateNotificationChannel } from '../api/notificationChannels'
 import type { NotificationChannelType } from '../api/types'
@@ -19,7 +19,7 @@ export function NotificationChannelForm({ onCreated, onCancel }: NotificationCha
   const [name, setName] = useState('')
   const [type, setType] = useState<NotificationChannelType>('EMAIL')
   const [email, setEmail] = useState('')
-  const [chatId, setChatId] = useState('')
+  const [telegramUsername, setTelegramUsername] = useState('')
 
   const createChannel = useCreateNotificationChannel()
 
@@ -29,9 +29,14 @@ export function NotificationChannelForm({ onCreated, onCancel }: NotificationCha
       {
         name,
         type,
-        // Mirrors NotificationChannelSerializer.validate on the backend:
-        // EMAIL needs an 'email' key, TELEGRAM needs a 'chat_id' key.
-        config: type === 'EMAIL' ? { email } : { chat_id: chatId },
+        // Mirrors NotificationChannelSerializer.validate on the backend.
+        // A Telegram channel carries no chat_id at this point and the API
+        // would ignore one anyway — the id is assigned by the connect
+        // handshake, from an update Telegram itself delivered. The
+        // username is optional and only used to cross-check who presses
+        // Start.
+        config:
+          type === 'EMAIL' ? { email } : telegramUsername ? { username: telegramUsername } : {},
       },
       { onSuccess: onCreated },
     )
@@ -77,16 +82,23 @@ export function NotificationChannelForm({ onCreated, onCancel }: NotificationCha
             />
           </Field>
         ) : (
-          <Field>
-            Telegram chat ID
-            <TextInput
-              name="chat_id"
-              fullWidth
-              value={chatId}
-              onChange={(event) => setChatId(event.target.value)}
-              required
-            />
-          </Field>
+          <>
+            <Field>
+              Telegram username
+              <TextInput
+                name="username"
+                fullWidth
+                value={telegramUsername}
+                onChange={(event) => setTelegramUsername(event.target.value)}
+                placeholder="@yourname"
+              />
+            </Field>
+            <FieldHint>
+              Optional. After creating the channel you'll get a one-time link — open it and press
+              Start in the bot to connect this chat. If you fill this in, only that account can use
+              the link.
+            </FieldHint>
+          </>
         )}
         {fieldErrors.config && <FieldError role="alert">{fieldErrors.config}</FieldError>}
 

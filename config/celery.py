@@ -30,6 +30,18 @@ app.conf.beat_schedule = {
         "task": "apps.checks.tasks.dispatch_due_checks",
         "schedule": 30.0,
     },
+    # Receives the /start commands that connect a Telegram chat to a
+    # channel. The task long-polls for 25s, so a 30s cadence keeps a poll
+    # open almost continuously — pressing Start in the bot then binds the
+    # channel within a second or two rather than on the next tick.
+    "poll-telegram-updates": {
+        "task": "apps.notifications.tasks.poll_telegram_updates",
+        "schedule": 30.0,
+        # Dropping a tick is better than queueing them up behind a slow
+        # poll: each one only asks Telegram "anything new?", so a missed
+        # tick costs latency, never data.
+        "options": {"expires": 25},
+    },
     # 5 minutes past the hour, not on the hour: gives the hour that just
     # ended a moment to fully close before summarizing it.
     "rollup-hourly-stats": {

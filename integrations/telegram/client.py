@@ -8,6 +8,8 @@ not one per channel — a NotificationChannel only stores which chat_id to
 send to, the same bot posts to all of them.
 """
 
+from dataclasses import dataclass, field
+
 import requests
 from django.conf import settings
 
@@ -15,6 +17,62 @@ from integrations.notification_result import SendResult
 
 API_BASE = "https://api.telegram.org"
 TIMEOUT_SECONDS = 10
+
+
+@dataclass(frozen=True)
+class UpdatesResult:
+    """Outcome of one getUpdates call. Same contract as SendResult: this
+    module never raises, so a caller only ever branches on `ok`."""
+
+    ok: bool
+    updates: list[dict] = field(default_factory=list)
+    error_message: str | None = None
+
+
+def get_updates(*, offset: int | None = None, timeout: int = 0) -> UpdatesResult:
+    """Fetch pending updates for the bot.
+
+    `offset` is Telegram's acknowledgement mechanism, not a cursor to page
+    with: passing `last_update_id + 1` is what permanently confirms every
+    update below it, so anything already handled is never sent again. Skip
+    it and Telegram re-sends the same backlog forever.
+
+    `timeout` turns this into a long poll — the request hangs open until an
+    update arrives or the timeout expires, which is what makes a claim feel
+    instant without polling in a tight loop. The HTTP read timeout is set
+    above it so the socket outlives the long poll Telegram is holding.
+    """
+    token = settings.TELEGRAM_BOT_TOKEN
+    if not token:
+        return UpdatesResult(ok=False, error_message="TELEGRAM_BOT_TOKEN is not configured.")
+
+    params: dict = {"timeout": timeout}
+    if offset is not None:
+        params["offset"] = offset
+
+    try:
+        response = requests.get(
+            f"{API_BASE}/bot{token}/getUpdates",
+            params=params,
+            timeout=timeout + TIMEOUT_SECONDS,
+        )
+    except requests.exceptions.RequestException as exc:
+        return UpdatesResult(ok=False, error_message=str(exc))
+
+    try:
+        body = response.json()
+    except ValueError:
+        return UpdatesResult(ok=False, error_message=response.text[:200])
+
+    if response.status_code != 200 or not body.get("ok"):
+        # 409 is the one worth recognising by sight: it means a webhook is
+        # registered for this bot, and Telegram refuses to serve getUpdates
+        # and a webhook at the same time.
+        return UpdatesResult(
+            ok=False, error_message=body.get("description") or response.text[:200]
+        )
+
+    return UpdatesResult(ok=True, updates=body.get("result") or [])
 
 
 def send_message(chat_id: str, text: str) -> SendResult:

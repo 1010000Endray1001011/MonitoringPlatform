@@ -29,9 +29,9 @@ def test_create_channel_rejects_a_config_that_does_not_match_the_type():
     with pytest.raises(DomainError):
         services.create_channel(
             user=user,
-            type=NotificationChannel.ChannelType.TELEGRAM,
+            type=NotificationChannel.ChannelType.EMAIL,
             name="Bad",
-            config={"email": "a@example.com"},
+            config={"chat_id": "12345"},
         )
 
 

@@ -25,9 +25,11 @@ Frontend: a React 19 + TypeScript SPA with a Windows-95-plus-cyberpunk look
 - **History & stats** — every check is recorded; hourly rollups power
   uptime/response-time summaries over 24h/7d/30d without scanning raw
   history. Raw checks are purged after they've been safely aggregated.
-- **Notifications** — email and Telegram channels, verified with a real test
-  message before they're trusted, then notified automatically on every
-  incident open/resolve via a retrying background delivery queue.
+- **Notifications** — email and Telegram channels, notified automatically on
+  every incident open/resolve via a retrying background delivery queue. An
+  email channel is proven with a real test message; a Telegram one is
+  connected by tapping a one-time link and pressing Start in the bot, which
+  is what proves the chat belongs to whoever asked for it.
 - **SSRF-safe by design** — a monitor's URL is validated at write time and
   its target re-resolved and re-checked immediately before every single
   probe, so this can't be turned into a proxy for scanning internal
@@ -214,8 +216,9 @@ notable ones:
 | `DATABASE_URL` / `REDIS_URL` | Standard connection URLs. |
 | `CELERY_TASK_ALWAYS_EAGER` | `True` runs tasks inline with no worker — local debugging only. |
 | `MONITORING_ALLOW_PRIVATE_TARGETS` | Lets monitors target private/internal addresses. Must stay `False` outside local/test — this is the SSRF guard's off switch. Production refuses to start if it's `True`. |
-| `TELEGRAM_BOT_TOKEN` | One bot for the whole platform; each channel only stores which `chat_id` to message. |
-| `EMAIL_BACKEND` | Defaults to the console backend — notifications print to the server log instead of sending real email. |
+| `TELEGRAM_BOT_TOKEN` | One bot for the whole platform; a channel stores only which chat to message. |
+| `TELEGRAM_BOT_USERNAME` | The bot's `@name` without the `@`. Only used to build the connect link, so leaving it empty means no link can be shown. |
+| `EMAIL_BACKEND` | Defaults to the console backend — notifications print to the server log instead of sending real email. Switch to the SMTP backend and set the `EMAIL_*` variables below to deliver real mail. |
 
 See [`frontend/.env.example`](frontend/.env.example) for the frontend's own
 (much shorter) list — just `VITE_API_BASE_URL`, baked into the static bundle
@@ -224,6 +227,93 @@ start), which is why Docker Compose passes it as a build arg rather than a
 runtime environment variable.
 
 Never commit a real `.env` — it's gitignored.
+
+### Sending real email
+
+Out of the box, email notifications go to the server log and nowhere else.
+To deliver them, switch the backend and fill in the connection details:
+
+```bash
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=you@gmail.com
+EMAIL_HOST_PASSWORD=your-app-password
+EMAIL_USE_TLS=True
+EMAIL_TIMEOUT=10
+DEFAULT_FROM_EMAIL=you@gmail.com
+```
+
+Three things that are easy to get wrong:
+
+- **Use an App Password, not your account password.** Gmail only issues one
+  once two-factor authentication is on, and rejects the account password
+  outright. Other providers have the same concept under different names.
+- **`DEFAULT_FROM_EMAIL` must match `EMAIL_HOST_USER`.** Providers rewrite or
+  reject a `From` they haven't authenticated, and report it as an opaque 5xx
+  that reads like a server fault.
+- **`EMAIL_USE_TLS` and `EMAIL_USE_SSL` are mutually exclusive.** Use TLS for
+  port 587 (STARTTLS) and SSL for 465; setting both fails at startup with a
+  message saying so.
+
+The `EMAIL_*` variables are only read when `EMAIL_BACKEND` is the SMTP one.
+Every other backend rejects unknown connection options and would fail to
+start, so they're passed along only when SMTP is actually selected.
+
+Verify it end to end from the UI: create an EMAIL notification channel on
+the Channels page and press **Verify** — that sends a real message
+synchronously and reports the failure inline if the provider refuses it.
+
+### Connecting Telegram
+
+A Telegram bot can't message someone who hasn't written to it first, so
+there's no chat id to configure up front. Instead the platform hands the
+user a one-time link, and pressing **Start** in the bot is what connects
+the chat — and simultaneously proves it belongs to whoever asked for it.
+
+Set the bot up once:
+
+1. Message [@BotFather](https://t.me/BotFather), send `/newbot`, and follow
+   the prompts. You get a token and the bot's `@name`.
+2. Put both in `.env` — the token authenticates, the name builds the link:
+
+```bash
+TELEGRAM_BOT_TOKEN=123456789:AA...
+TELEGRAM_BOT_USERNAME=your_bot_name
+```
+
+After that, connecting a chat is entirely self-service: add a Telegram
+channel on the Channels page, optionally declare your `@username`, tap the
+link the row shows, and press Start. The row flips from *Waiting for Start*
+to *Verified* on its own. Declaring a username is a cross-check — only that
+account can use the link — and it's optional because Telegram accounts are
+not obliged to have one.
+
+Links expire after 30 minutes (`TELEGRAM_CLAIM_TTL_MINUTES`). An expired one
+is replaced by pressing **Get a new link**, which also invalidates the
+previous link.
+
+Two things that will make it silently not work:
+
+- **`celery-beat` and `celery-worker` have to be running.** The `/start`
+  that connects a chat is received by a scheduled task on the
+  `notifications` queue, not by the web process. With no worker, the link
+  is issued fine and the channel simply waits forever.
+- **A registered webhook blocks it.** Telegram refuses to serve
+  `getUpdates` and a webhook at the same time and answers with `409
+  Conflict`, which shows up in the worker log. Check and clear with:
+
+```bash
+curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+```
+
+```bash
+curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteWebhook"
+```
+
+The bot has no other commands — it exists to receive that one `/start` and
+to deliver incident alerts. A `/start` without a link just replies with
+instructions.
 
 ## Project layout
 
