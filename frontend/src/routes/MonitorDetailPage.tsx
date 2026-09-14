@@ -8,6 +8,7 @@ import {
   useMonitorStats,
   useTriggerCheck,
 } from '../api/monitorDetail'
+import { ApiError } from '../api/client'
 import type { MonitorStats, StatsPeriod } from '../api/types'
 import { CheckHistoryList } from '../components/CheckHistoryList'
 import { MonitorEditForm } from '../components/MonitorEditForm'
@@ -28,6 +29,20 @@ const PERIOD_OPTIONS: { label: string; value: StatsPeriod }[] = [
 // useCheckHistory (`latest.checked_at > pollBaseline`) is satisfied by
 // the very first check a brand-new monitor ever records.
 const BEFORE_ANY_CHECK = '1970-01-01T00:00:00Z'
+
+function describeCheckError(error: unknown): string {
+  if (error instanceof ApiError) {
+    // 5/min per user, deliberately tighter than the general rate: this
+    // endpoint makes our own infrastructure call an arbitrary URL.
+    if (error.status === 429) {
+      return 'Too many manual checks — this is limited to 5 per minute. Wait a moment, then try again.'
+    }
+    if (error.status === 409) {
+      return "This monitor is paused, so it won't run checks. Resume it from the dashboard first."
+    }
+  }
+  return "Couldn't queue the check. Try again."
+}
 
 // total_downtime_seconds comes back as a raw integer — this is purely a
 // display nicety, not needed anywhere else, so it stays local instead of
@@ -72,8 +87,14 @@ export function MonitorDetailPage() {
     pollBaseline !== undefined && (!latestCheckedAt || latestCheckedAt <= pollBaseline)
 
   function handleCheckNow() {
-    setPollBaseline(latestCheckedAt ?? BEFORE_ANY_CHECK)
-    triggerCheck.mutate()
+    const baseline = latestCheckedAt ?? BEFORE_ANY_CHECK
+    // The baseline is what makes the button say "Waiting for result…", and
+    // only a newer check result clears it. Setting it before knowing the
+    // request succeeded meant a refused trigger — throttled at 5/min, or a
+    // paused monitor — left the button disabled on "Waiting" permanently,
+    // since no check was ever queued to arrive and end the wait. Nothing
+    // short of reloading the page recovered from it.
+    triggerCheck.mutate(undefined, { onSuccess: () => setPollBaseline(baseline) })
   }
 
   function handleDelete() {
@@ -119,6 +140,18 @@ export function MonitorDetailPage() {
       <section>
         <StatusBadge status={m.status} />
         {m.open_incident_id && <OpenIncidentFlag />}
+        {/* Only while a losing streak is under way and the monitor hasn't
+            flipped yet. This is the window that otherwise looks like a bug:
+            a check just failed, the status still reads UP, and nothing on
+            the page explains that one more failure is what it takes. Once
+            the status is DOWN the badge already says everything, and at
+            zero there is no streak worth mentioning. */}
+        {m.consecutive_failures > 0 && m.status !== 'DOWN' && (
+          <p>
+            Failing {m.consecutive_failures} of {m.failure_threshold} checks needed to open an
+            incident
+          </p>
+        )}
         <p>{m.url}</p>
         <p>
           {m.method} · expects {m.expected_status} · every {m.interval_seconds}s · timeout{' '}
@@ -144,9 +177,14 @@ export function MonitorDetailPage() {
       </section>
 
       <section>
-        <Button onClick={handleCheckNow} disabled={triggerCheck.isPending || isWaitingForCheck}>
+        <Button
+          onClick={handleCheckNow}
+          disabled={triggerCheck.isPending || isWaitingForCheck || !m.is_enabled}
+        >
           {isWaitingForCheck ? 'Waiting for result…' : 'Check now'}
         </Button>
+        {!m.is_enabled && <span>Paused — resume it from the dashboard to run checks.</span>}
+        {triggerCheck.isError && <p role="alert">{describeCheckError(triggerCheck.error)}</p>}
       </section>
 
       <section>

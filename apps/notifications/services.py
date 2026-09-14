@@ -233,12 +233,19 @@ def issue_telegram_claim(*, channel: NotificationChannel) -> TelegramClaim:
 def telegram_deep_link(*, channel: NotificationChannel) -> str | None:
     """The t.me link to show the user, or None when there's nothing to show
     — already connected, never issued, expired, or no bot username set."""
-    if not settings.TELEGRAM_BOT_USERNAME:
+    # Operators paste the handle the way Telegram shows it — "@name" — but a
+    # t.me path takes the bare name. "t.me/@name" is not a valid path, and
+    # Telegram does not 404 it: it redirects to its own download page and drops
+    # the ?start payload on the way. So the symptom is "the link won't open the
+    # app" rather than anything pointing at a stray character in .env. Accept
+    # either spelling here instead of relying on the operator to spot it.
+    username = settings.TELEGRAM_BOT_USERNAME.strip().lstrip("@")
+    if not username:
         return None
     claim = getattr(channel, "telegram_claim", None)
     if claim is None or claim.claimed_at is not None or claim.is_expired():
         return None
-    return f"https://t.me/{settings.TELEGRAM_BOT_USERNAME}?start={claim.token}"
+    return f"https://t.me/{username}?start={claim.token}"
 
 
 @dataclass(frozen=True)

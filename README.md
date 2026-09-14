@@ -217,7 +217,7 @@ notable ones:
 | `CELERY_TASK_ALWAYS_EAGER` | `True` runs tasks inline with no worker — local debugging only. |
 | `MONITORING_ALLOW_PRIVATE_TARGETS` | Lets monitors target private/internal addresses. Must stay `False` outside local/test — this is the SSRF guard's off switch. Production refuses to start if it's `True`. |
 | `TELEGRAM_BOT_TOKEN` | One bot for the whole platform; a channel stores only which chat to message. |
-| `TELEGRAM_BOT_USERNAME` | The bot's `@name` without the `@`. Only used to build the connect link, so leaving it empty means no link can be shown. |
+| `TELEGRAM_BOT_USERNAME` | The bot's `@name`, with or without the `@`. Only used to build the connect link, so leaving it empty means no link can be shown. |
 | `EMAIL_BACKEND` | Defaults to the console backend — notifications print to the server log instead of sending real email. Switch to the SMTP backend and set the `EMAIL_*` variables below to deliver real mail. |
 
 See [`frontend/.env.example`](frontend/.env.example) for the frontend's own
@@ -281,6 +281,8 @@ Set the bot up once:
 TELEGRAM_BOT_TOKEN=123456789:AA...
 TELEGRAM_BOT_USERNAME=your_bot_name
 ```
+
+   A leading `@` is stripped, so either spelling works.
 
 After that, connecting a chat is entirely self-service: add a Telegram
 channel on the Channels page, optionally declare your `@username`, tap the

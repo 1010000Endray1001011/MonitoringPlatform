@@ -99,7 +99,14 @@ describe('DashboardPage', () => {
     // handler a no-op. Found live in the browser (typing "404" left the
     // field showing "200"); fixed by switching both fields to
     // TextInput type="number". This test is what should have caught it.
-    let submittedBody: { expected_status?: number; timeout_seconds?: number } | undefined
+    let submittedBody:
+      | {
+          expected_status?: number
+          timeout_seconds?: number
+          failure_threshold?: number
+          success_threshold?: number
+        }
+      | undefined
     let created = false
     server.use(
       http.get(`${BASE}/api/v1/monitors/`, () =>
@@ -109,6 +116,8 @@ describe('DashboardPage', () => {
         submittedBody = (await request.json()) as {
           expected_status?: number
           timeout_seconds?: number
+          failure_threshold?: number
+          success_threshold?: number
         }
         created = true
         return HttpResponse.json(makeMonitor({ name: 'New Site' }), { status: 201 })
@@ -126,11 +135,16 @@ describe('DashboardPage', () => {
       target: { value: '404' },
     })
     fireEvent.change(screen.getByLabelText('Timeout (seconds)'), { target: { value: '25' } })
+    fireEvent.change(screen.getByLabelText('Failure threshold'), { target: { value: '1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create monitor' }))
 
     await screen.findByText('New Site')
     expect(submittedBody?.expected_status).toBe(404)
     expect(submittedBody?.timeout_seconds).toBe(25)
+    expect(submittedBody?.failure_threshold).toBe(1)
+    // Untouched, so it should carry the model's own default rather than
+    // being omitted and left to the server to guess at.
+    expect(submittedBody?.success_threshold).toBe(1)
   })
 
   it('offers a request body only for POST, and submits what was typed', async () => {

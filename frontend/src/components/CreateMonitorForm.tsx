@@ -29,6 +29,11 @@ export function CreateMonitorForm({ onCreated, onCancel }: CreateMonitorFormProp
   const [expectedStatus, setExpectedStatus] = useState(200)
   const [intervalSeconds, setIntervalSeconds] = useState<MonitorInterval>(300)
   const [timeoutSeconds, setTimeoutSeconds] = useState(10)
+  // Defaults mirror the model's own (2 failures to go DOWN, 1 success to
+  // recover) so an untouched form submits exactly what the API would have
+  // applied on its own.
+  const [failureThreshold, setFailureThreshold] = useState(2)
+  const [successThreshold, setSuccessThreshold] = useState(1)
   const [channelIds, setChannelIds] = useState<string[]>([])
 
   const createMonitor = useCreateMonitor()
@@ -48,6 +53,8 @@ export function CreateMonitorForm({ onCreated, onCancel }: CreateMonitorFormProp
         expected_status: expectedStatus,
         interval_seconds: intervalSeconds,
         timeout_seconds: timeoutSeconds,
+        failure_threshold: failureThreshold,
+        success_threshold: successThreshold,
         notification_channel_ids: channelIds,
       },
       { onSuccess: onCreated },
@@ -163,6 +170,46 @@ export function CreateMonitorForm({ onCreated, onCancel }: CreateMonitorFormProp
         </Field>
         {fieldErrors.timeout_seconds && (
           <FieldError role="alert">{fieldErrors.timeout_seconds}</FieldError>
+        )}
+
+        <Field $compact>
+          Failure threshold
+          <TextInput
+            type="number"
+            min={1}
+            max={10}
+            value={failureThreshold}
+            onChange={(event) => setFailureThreshold(Number(event.target.value))}
+          />
+        </Field>
+        {/* Kept out of the <Field> label on purpose: label text becomes the
+            input's accessible name, so a hint inside it would be read out as
+            part of the field's name. */}
+        <FieldHint>
+          How many failed checks in a row before the monitor is marked DOWN and an incident opens.
+          Above 1 this deliberately rides out a single blip, so the first failing check leaves the
+          monitor UP — set it to 1 if you want incidents to open immediately.
+        </FieldHint>
+        {fieldErrors.failure_threshold && (
+          <FieldError role="alert">{fieldErrors.failure_threshold}</FieldError>
+        )}
+
+        <Field $compact>
+          Recovery threshold
+          <TextInput
+            type="number"
+            min={1}
+            max={10}
+            value={successThreshold}
+            onChange={(event) => setSuccessThreshold(Number(event.target.value))}
+          />
+        </Field>
+        <FieldHint>
+          How many successful checks in a row before it counts as UP again and the open incident
+          resolves.
+        </FieldHint>
+        {fieldErrors.success_threshold && (
+          <FieldError role="alert">{fieldErrors.success_threshold}</FieldError>
         )}
 
         <ChannelMultiSelect

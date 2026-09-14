@@ -187,6 +187,26 @@ describe('MonitorDetailPage', () => {
     expect(await screen.findByText(/open incident/i)).toBeInTheDocument()
   })
 
+  it('explains why a monitor with a failed check behind it is still UP', async () => {
+    // The window users read as a bug: one check has failed, the status still
+    // says UP, and without this line nothing says a second failure is what
+    // opens the incident.
+    mockDetailEndpoints({
+      monitor: { status: 'UP', consecutive_failures: 1, failure_threshold: 2 },
+    })
+    renderDetailPage()
+
+    expect(await screen.findByText(/failing 1 of 2 checks/i)).toBeInTheDocument()
+  })
+
+  it('says nothing about a streak when there is none', async () => {
+    mockDetailEndpoints({ monitor: { status: 'UP', consecutive_failures: 0 } })
+    renderDetailPage()
+
+    await screen.findByText('Prod API')
+    expect(screen.queryByText(/checks needed to open an incident/i)).not.toBeInTheDocument()
+  })
+
   it('triggers a manual check and disables the button while waiting for a result', async () => {
     mockDetailEndpoints({ checks: [makeCheck()] })
     server.use(
@@ -200,6 +220,37 @@ describe('MonitorDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Check now' }))
 
     expect(await screen.findByRole('button', { name: /waiting for result/i })).toBeDisabled()
+  })
+
+  it('recovers instead of hanging on "Waiting for result" when the check is refused', async () => {
+    // The endpoint allows 5 manual checks a minute. The button used to start
+    // waiting before the request came back, and only a newer check result
+    // could end that wait — so a refused trigger disabled it permanently and
+    // said nothing about why. Reloading the page was the only way out.
+    mockDetailEndpoints({ checks: [makeCheck()] })
+    server.use(
+      http.post(`${BASE}/api/v1/monitors/${MONITOR_ID}/check/`, () =>
+        HttpResponse.json({ error: { code: 'throttled' } }, { status: 429 }),
+      ),
+    )
+    renderDetailPage()
+    await screen.findByText('Prod API')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check now' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/5 per minute/i)
+    expect(screen.getByRole('button', { name: 'Check now' })).toBeEnabled()
+  })
+
+  it('explains a refused check on a paused monitor instead of just failing', async () => {
+    mockDetailEndpoints({ monitor: { is_enabled: false }, checks: [makeCheck()] })
+    renderDetailPage()
+    await screen.findByText('Prod API')
+
+    // Disabled rather than clickable: the request could only ever come back
+    // as a 409, so the page says why up front instead of offering it.
+    expect(screen.getByRole('button', { name: 'Check now' })).toBeDisabled()
+    expect(screen.getByText(/paused/i)).toBeInTheDocument()
   })
 
   it('saves an edit and shows the updated name', async () => {

@@ -176,6 +176,19 @@ def test_deep_link_is_built_from_the_configured_bot_username(settings):
     assert link == f"https://t.me/m0nit0ring_api_bot?start={channel.telegram_claim.token}"
 
 
+def test_deep_link_drops_an_at_sign_pasted_into_the_bot_username(settings):
+    # "@name" is how Telegram itself displays a handle, so it is what gets
+    # pasted into .env — but "t.me/@name" is not a valid t.me path. Telegram
+    # redirects it to its download page and loses the ?start payload, so the
+    # link looks broken and the chat is never bound. Cheap to tolerate here.
+    settings.TELEGRAM_BOT_USERNAME = "@m0nit0ring_api_bot"
+    channel = make_telegram_channel(username="someone")
+
+    link = services.telegram_deep_link(channel=channel)
+
+    assert link == f"https://t.me/m0nit0ring_api_bot?start={channel.telegram_claim.token}"
+
+
 def test_no_deep_link_once_the_channel_is_connected(settings):
     settings.TELEGRAM_BOT_USERNAME = "m0nit0ring_api_bot"
     channel = make_telegram_channel(username="someone")
@@ -187,8 +200,11 @@ def test_no_deep_link_once_the_channel_is_connected(settings):
     assert services.telegram_deep_link(channel=channel) is None
 
 
-def test_no_deep_link_without_a_configured_bot_username(settings):
-    settings.TELEGRAM_BOT_USERNAME = ""
+@pytest.mark.parametrize("configured", ["", "   ", "@"])
+def test_no_deep_link_without_a_configured_bot_username(settings, configured):
+    # "@" on its own is what an operator leaves behind after deleting the name
+    # but not the sigil; it normalises to empty, which is no username at all.
+    settings.TELEGRAM_BOT_USERNAME = configured
     channel = make_telegram_channel(username="someone")
 
     assert services.telegram_deep_link(channel=channel) is None
